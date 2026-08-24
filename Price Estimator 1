@@ -1,0 +1,604 @@
+-- =========================================================
+-- MARKET APPRAISER
+-- CC:Tweaked 1.20.1
+--
+-- Put an item into the connected barrel.
+-- The computer will automatically estimate its value.
+--
+-- Currency:
+-- 1 Spur     = 1
+-- 1 Bevel    = 8
+-- 1 Sprocket = 16
+-- 1 Cog      = 64
+-- 1 Crown    = 512
+-- 1 Sun      = 4096
+-- =========================================================
+
+
+-- =========================================================
+-- FIND BARREL / INVENTORY
+-- =========================================================
+
+local inventory = peripheral.find("inventory")
+
+if not inventory then
+    error("No inventory found next to computer.")
+end
+
+
+-- =========================================================
+-- SETTINGS
+-- =========================================================
+
+local DEBUG = false
+
+-- Base prices for common resource categories.
+-- These are deliberately LOW.
+-- The system should value processing and rarity more.
+local BASE_PRICES = {
+    dirt = 0,
+    sand = 0,
+    gravel = 0,
+    cobblestone = 0,
+    stone = 0,
+
+    coal = 1,
+    iron = 1,
+    copper = 1,
+    gold = 2,
+    redstone = 1,
+    lapis = 1,
+    quartz = 2,
+
+    diamond = 16,
+    emerald = 16,
+
+    netherite = 64,
+}
+
+
+-- =========================================================
+-- CURRENCY
+-- =========================================================
+
+local function formatMoney(value)
+
+    if value <= 0 then
+        return "FREE"
+    end
+
+    local sun = math.floor(value / 4096)
+    value = value % 4096
+
+    local crown = math.floor(value / 512)
+    value = value % 512
+
+    local cog = math.floor(value / 64)
+    value = value % 64
+
+    local sprocket = math.floor(value / 16)
+    value = value % 16
+
+    local bevel = math.floor(value / 8)
+    local spur = value % 8
+
+    local parts = {}
+
+    if sun > 0 then
+        table.insert(parts, sun .. " Sun")
+    end
+
+    if crown > 0 then
+        table.insert(parts, crown .. " Crown")
+    end
+
+    if cog > 0 then
+        table.insert(parts, cog .. " Cog")
+    end
+
+    if sprocket > 0 then
+        table.insert(parts, sprocket .. " Sprocket")
+    end
+
+    if bevel > 0 then
+        table.insert(parts, bevel .. " Bevel")
+    end
+
+    if spur > 0 then
+        table.insert(parts, spur .. " Spur")
+    end
+
+    return table.concat(parts, " + ")
+end
+
+
+-- =========================================================
+-- STRING HELPERS
+-- =========================================================
+
+local function contains(text, word)
+
+    return string.find(text, word, 1, true) ~= nil
+end
+
+
+local function hasTag(item, tag)
+
+    if not item.tags then
+        return false
+    end
+
+    return item.tags[tag] == true
+end
+
+
+-- =========================================================
+-- DETERMINE BASE VALUE
+-- =========================================================
+
+local function getBaseValue(item)
+
+    local name = item.name or ""
+    local path = name
+
+    -- Remove mod namespace.
+    local itemName = string.match(name, ":(.+)$")
+
+    if not itemName then
+        itemName = name
+    end
+
+
+    -- Exact common resources.
+    for material, price in pairs(BASE_PRICES) do
+
+        if itemName == material then
+            return price
+        end
+    end
+
+
+    -- =====================================================
+    -- VANILLA TAG BASED DETECTION
+    -- =====================================================
+
+    if hasTag(item, "minecraft:logs") then
+        return 0
+    end
+
+    if hasTag(item, "minecraft:planks") then
+        return 0
+    end
+
+    if hasTag(item, "minecraft:sand") then
+        return 0
+    end
+
+    if hasTag(item, "minecraft:dirt") then
+        return 0
+    end
+
+    if hasTag(item, "minecraft:stone_crafting_materials") then
+        return 0
+    end
+
+
+    -- =====================================================
+    -- NAME BASED DETECTION
+    -- =====================================================
+
+    -- Extremely common materials.
+    if contains(itemName, "dirt")
+        or contains(itemName, "cobblestone")
+        or contains(itemName, "gravel")
+        or contains(itemName, "stone")
+        or contains(itemName, "sand") then
+
+        return 0
+    end
+
+
+    if contains(itemName, "wood")
+        or contains(itemName, "log")
+        or contains(itemName, "plank") then
+
+        return 0
+    end
+
+
+    -- Basic ores and materials.
+    if contains(itemName, "coal") then
+        return 1
+    end
+
+    if contains(itemName, "iron") then
+        return 1
+    end
+
+    if contains(itemName, "copper") then
+        return 1
+    end
+
+    if contains(itemName, "gold") then
+        return 2
+    end
+
+    if contains(itemName, "redstone") then
+        return 1
+    end
+
+    if contains(itemName, "lapis") then
+        return 1
+    end
+
+    if contains(itemName, "quartz") then
+        return 2
+    end
+
+
+    -- Valuable materials.
+    if contains(itemName, "diamond") then
+        return 16
+    end
+
+    if contains(itemName, "emerald") then
+        return 16
+    end
+
+    if contains(itemName, "netherite") then
+        return 64
+    end
+
+
+    -- =====================================================
+    -- FOOD
+    -- =====================================================
+
+    if hasTag(item, "minecraft:food") then
+        return 1
+    end
+
+    if contains(itemName, "bread")
+        or contains(itemName, "carrot")
+        or contains(itemName, "potato")
+        or contains(itemName, "apple") then
+
+        return 1
+    end
+
+
+    -- =====================================================
+    -- CREATE
+    -- =====================================================
+
+    if contains(name, "create:") then
+
+        -- Very simple Create components.
+        if contains(itemName, "shaft")
+            or contains(itemName, "cogwheel")
+            or contains(itemName, "large_cogwheel") then
+
+            return 0
+        end
+
+        -- Andesite alloy requires processing.
+        if contains(itemName, "andesite_alloy") then
+            return 2
+        end
+
+        -- Other Create items are considered processed.
+        return 4
+    end
+
+
+    -- =====================================================
+    -- MEKANISM
+    -- =====================================================
+
+    if contains(name, "mekanism:") then
+
+        -- Raw ores/materials.
+        if contains(itemName, "dust")
+            or contains(itemName, "clump")
+            or contains(itemName, "shard")
+            or contains(itemName, "crystal") then
+
+            return 2
+        end
+
+        -- Processed Mekanism components.
+        if contains(itemName, "alloy")
+            or contains(itemName, "circuit")
+            or contains(itemName, "pellet") then
+
+            return 8
+        end
+
+        -- Machines/components are expensive.
+        if contains(itemName, "machine")
+            or contains(itemName, "factory")
+            or contains(itemName, "generator") then
+
+            return 32
+        end
+
+        return 4
+    end
+
+
+    -- =====================================================
+    -- CLOTHING / HATS
+    -- =====================================================
+
+    if contains(name, "simplehats")
+        or contains(name, "simple_hats")
+        or contains(name, "selfexpression")
+        or contains(name, "self_expression") then
+
+        -- Cosmetic items are valuable because they are
+        -- collectible and not basic resources.
+        return 64
+    end
+
+
+    -- =====================================================
+    -- ENCHANTED ITEMS
+    -- =====================================================
+
+    if item.enchantments then
+
+        local enchantCount = #item.enchantments
+
+        if enchantCount > 0 then
+            return 32 + enchantCount * 16
+        end
+    end
+
+
+    -- =====================================================
+    -- TOOLS / WEAPONS / ARMOUR
+    -- =====================================================
+
+    if contains(itemName, "sword")
+        or contains(itemName, "axe")
+        or contains(itemName, "pickaxe")
+        or contains(itemName, "shovel")
+        or contains(itemName, "hoe")
+        or contains(itemName, "bow")
+        or contains(itemName, "crossbow") then
+
+        return 16
+    end
+
+
+    if contains(itemName, "helmet")
+        or contains(itemName, "chestplate")
+        or contains(itemName, "leggings")
+        or contains(itemName, "boots") then
+
+        return 24
+    end
+
+
+    -- =====================================================
+    -- UNKNOWN MODDED ITEM
+    -- =====================================================
+
+    -- Unknown items are NOT automatically expensive.
+    -- We give them a small default value.
+    return 2
+end
+
+
+-- =========================================================
+-- COMPLEXITY MODIFIER
+-- =========================================================
+
+local function getComplexityMultiplier(item)
+
+    local name = item.name or ""
+    local itemName = string.match(name, ":(.+)$") or name
+
+    local multiplier = 1
+
+
+    -- Create processed items.
+    if contains(name, "create:") then
+
+        if contains(itemName, "machine")
+            or contains(itemName, "contraption")
+            or contains(itemName, "assembly") then
+
+            multiplier = multiplier + 2
+        end
+    end
+
+
+    -- Mekanism advanced items.
+    if contains(name, "mekanism:") then
+
+        if contains(itemName, "ultimate")
+            or contains(itemName, "elite")
+            or contains(itemName, "advanced") then
+
+            multiplier = multiplier + 2
+        end
+    end
+
+
+    -- Rare-looking / special items.
+    if contains(itemName, "rare")
+        or contains(itemName, "legendary")
+        or contains(itemName, "ancient")
+        or contains(itemName, "relic") then
+
+        multiplier = multiplier + 2
+    end
+
+
+    return multiplier
+end
+
+
+-- =========================================================
+-- CALCULATE PRICE
+-- =========================================================
+
+local function calculatePrice(item)
+
+    local base = getBaseValue(item)
+
+    if base <= 0 then
+        return 0
+    end
+
+    local multiplier = getComplexityMultiplier(item)
+
+    local price = math.floor(base * multiplier)
+
+    return price
+end
+
+
+-- =========================================================
+-- DISPLAY
+-- =========================================================
+
+local function clear()
+
+    term.clear()
+    term.setCursorPos(1, 1)
+
+end
+
+
+local function showItem(item)
+
+    clear()
+
+    print("================================")
+    print("        MARKET APPRAISER")
+    print("================================")
+    print()
+
+    print("Item:")
+    print(item.displayName or item.name)
+
+    print()
+
+    print("ID:")
+    print(item.name)
+
+    print()
+
+    print("Amount:")
+    print(item.count)
+
+    print()
+
+    local price = calculatePrice(item)
+    local total = price * item.count
+
+    print("--------------------------------")
+    print("ESTIMATED VALUE")
+    print("--------------------------------")
+    print()
+
+    print("1 item:")
+    print(formatMoney(price))
+
+    print()
+
+    print("Entire stack:")
+    print(formatMoney(total))
+
+    print()
+
+    if price == 0 then
+        print("This item has no economic value.")
+    else
+        print("Estimated automatically.")
+    end
+
+    if DEBUG then
+
+        print()
+        print("--------------------------------")
+        print("DEBUG")
+        print("--------------------------------")
+        print("Base:")
+        print(getBaseValue(item))
+        print("Multiplier:")
+        print(getComplexityMultiplier(item))
+
+    end
+end
+
+
+-- =========================================================
+-- GET FIRST ITEM
+-- =========================================================
+
+local function getFirstItem()
+
+    local items = inventory.list()
+
+    for slot, basic in pairs(items) do
+
+        local detail = inventory.getItemDetail(slot)
+
+        if detail then
+            return detail
+        end
+    end
+
+    return nil
+end
+
+
+-- =========================================================
+-- MAIN LOOP
+-- =========================================================
+
+local lastID = nil
+
+while true do
+
+    local item = getFirstItem()
+
+    if not item then
+
+        clear()
+
+        print("================================")
+        print("        MARKET APPRAISER")
+        print("================================")
+        print()
+        print("Put an item into the barrel.")
+        print()
+        print("Waiting...")
+
+        lastID = nil
+
+    else
+
+        local id =
+            tostring(item.name)
+            .. ":"
+            .. tostring(item.nbt)
+            .. ":"
+            .. tostring(item.count)
+
+        if id ~= lastID then
+
+            showItem(item)
+
+            lastID = id
+
+        end
+
+    end
+
+    sleep(1)
+
+end
