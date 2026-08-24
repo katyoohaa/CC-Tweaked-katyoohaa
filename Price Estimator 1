@@ -1,65 +1,48 @@
--- =========================================================
--- MARKET APPRAISER
+-- ============================================================
+-- MARKET APPRAISER v2
 -- CC:Tweaked 1.20.1
 --
 -- Put an item into the connected barrel.
--- The computer will automatically estimate its value.
+-- The computer automatically estimates its value.
 --
 -- Currency:
--- 1 Spur     = 1
--- 1 Bevel    = 8
--- 1 Sprocket = 16
--- 1 Cog      = 64
--- 1 Crown    = 512
--- 1 Sun      = 4096
--- =========================================================
+-- 1 Spur      = 1
+-- 1 Bevel     = 8
+-- 1 Sprocket  = 16
+-- 1 Cog       = 64
+-- 1 Crown     = 512
+-- 1 Sun       = 4096
+-- ============================================================
 
 
--- =========================================================
--- FIND BARREL / INVENTORY
--- =========================================================
+-- ============================================================
+-- FIND INVENTORY
+-- ============================================================
 
 local inventory = peripheral.find("inventory")
 
 if not inventory then
-    error("No inventory found next to computer.")
+    error("No inventory found. Put a barrel next to the computer.")
 end
 
 
--- =========================================================
+-- ============================================================
 -- SETTINGS
--- =========================================================
+-- ============================================================
 
-local DEBUG = false
+local DEBUG = true
 
--- Base prices for common resource categories.
--- These are deliberately LOW.
--- The system should value processing and rarity more.
-local BASE_PRICES = {
-    dirt = 0,
-    sand = 0,
-    gravel = 0,
-    cobblestone = 0,
-    stone = 0,
+-- Minimum price for an unknown MOD item.
+-- Modded items should never be cheaper than basic vanilla items.
+local MOD_MINIMUM = 4
 
-    coal = 1,
-    iron = 1,
-    copper = 1,
-    gold = 2,
-    redstone = 1,
-    lapis = 1,
-    quartz = 2,
-
-    diamond = 16,
-    emerald = 16,
-
-    netherite = 64,
-}
+-- Minimum price for an unknown VANILLA item.
+local VANILLA_MINIMUM = 1
 
 
--- =========================================================
+-- ============================================================
 -- CURRENCY
--- =========================================================
+-- ============================================================
 
 local function formatMoney(value)
 
@@ -112,357 +95,727 @@ local function formatMoney(value)
 end
 
 
--- =========================================================
--- STRING HELPERS
--- =========================================================
+-- ============================================================
+-- TEXT HELPERS
+-- ============================================================
 
-local function contains(text, word)
+local function contains(text, value)
 
-    return string.find(text, word, 1, true) ~= nil
+    return string.find(
+        string.lower(text or ""),
+        string.lower(value),
+        1,
+        true
+    ) ~= nil
+
 end
 
 
-local function hasTag(item, tag)
+local function getNamespace(id)
 
-    if not item.tags then
-        return false
+    return string.match(id or "", "^([^:]+):") or "minecraft"
+
+end
+
+
+local function getItemName(id)
+
+    return string.match(id or "", "^[^:]+:(.+)$") or id
+
+end
+
+
+-- ============================================================
+-- VANILLA RAW MATERIALS
+--
+-- These are intentionally VERY cheap.
+-- ============================================================
+
+local VANILLA_RAW = {
+
+    dirt = 0,
+    grass_block = 0,
+    sand = 0,
+    red_sand = 0,
+    gravel = 0,
+    clay_ball = 0,
+    cobblestone = 0,
+    stone = 0,
+    netherrack = 0,
+    end_stone = 0,
+
+    oak_log = 0,
+    spruce_log = 0,
+    birch_log = 0,
+    jungle_log = 0,
+    acacia_log = 0,
+    dark_oak_log = 0,
+    mangrove_log = 0,
+    cherry_log = 0,
+
+    oak_planks = 0,
+    spruce_planks = 0,
+    birch_planks = 0,
+    jungle_planks = 0,
+    acacia_planks = 0,
+    dark_oak_planks = 0,
+    mangrove_planks = 0,
+    cherry_planks = 0,
+
+    stick = 0,
+
+    coal = 1,
+    iron_ingot = 1,
+    copper_ingot = 1,
+    gold_ingot = 2,
+
+    redstone = 1,
+    lapis_lazuli = 1,
+    quartz = 2,
+
+    diamond = 16,
+    emerald = 16,
+
+    netherite_scrap = 32,
+    netherite_ingot = 128
+}
+
+
+-- ============================================================
+-- VERY COMMON VANILLA ITEMS
+-- ============================================================
+
+local VANILLA_COMMON = {
+
+    torch = 1,
+    paper = 1,
+    book = 2,
+
+    glass = 1,
+    glass_pane = 1,
+
+    brick = 1,
+    stone_bricks = 1,
+
+    iron_nugget = 1,
+    gold_nugget = 1,
+
+    leather = 1,
+    string = 1,
+
+    bone = 1,
+    feather = 1,
+
+    flint = 1,
+
+    wheat = 1,
+    wheat_seeds = 0,
+
+    carrot = 1,
+    potato = 1,
+    beetroot = 1,
+    apple = 1,
+
+    bread = 1,
+
+    cooked_beef = 2,
+    cooked_porkchop = 2,
+    cooked_chicken = 2,
+    cooked_mutton = 2,
+    cooked_rabbit = 2,
+
+    bucket = 4,
+    water_bucket = 4,
+    lava_bucket = 8
+}
+
+
+-- ============================================================
+-- VANILLA PROCESSED ITEMS
+--
+-- More expensive than raw materials,
+-- but still cheaper than complex modded machinery.
+-- ============================================================
+
+local VANILLA_PROCESSED = {
+
+    iron_block = 9,
+    gold_block = 18,
+    copper_block = 9,
+
+    diamond_block = 144,
+    emerald_block = 144,
+
+    obsidian = 4,
+
+    piston = 8,
+    sticky_piston = 12,
+
+    dispenser = 8,
+    dropper = 6,
+
+    hopper = 12,
+
+    observer = 8,
+
+    comparator = 8,
+    repeater = 4,
+
+    enchanting_table = 64,
+
+    anvil = 48,
+
+    brewing_stand = 16,
+
+    beacon = 512
+}
+
+
+-- ============================================================
+-- MODS THAT ARE PART OF YOUR SERVER
+--
+-- These receive an automatic price multiplier.
+-- ============================================================
+
+local MOD_MULTIPLIERS = {
+
+    create = 2.5,
+
+    mekanism = 3.5,
+
+    refinedstorage = 3.0,
+    rs = 3.0,
+
+    advancedperipherals = 3.0,
+    computercraft = 2.5,
+
+    simplehats = 5.0,
+    selfexpression = 5.0,
+
+    alexsmobs = 3.0,
+    iceandfire = 4.0,
+
+    fossilsarcheology = 4.0,
+
+    lootr = 2.0,
+
+    farmersdelight = 1.5,
+    farmersdelight = 1.5,
+
+    growthcraft = 2.0
+}
+
+
+-- ============================================================
+-- WORDS THAT INDICATE SIMPLE RAW MATERIAL
+-- ============================================================
+
+local RAW_WORDS = {
+
+    "dust",
+    "ore",
+    "raw_",
+    "_raw",
+
+    "ingot",
+    "nugget",
+
+    "gem",
+
+    "log",
+    "wood",
+    "plank",
+
+    "stone",
+    "cobble",
+
+    "sand",
+    "gravel",
+
+    "dirt",
+
+    "leaves",
+    "leaf",
+
+    "seeds",
+    "seed",
+
+    "wheat",
+
+    "fiber",
+    "fibers",
+
+    "crop"
+}
+
+
+-- ============================================================
+-- WORDS THAT INDICATE PROCESSED MATERIAL
+-- ============================================================
+
+local PROCESSED_WORDS = {
+
+    "alloy",
+    "plate",
+    "rod",
+    "gear",
+    "component",
+
+    "wire",
+    "circuit",
+
+    "crystal",
+    "clump",
+    "shard",
+
+    "ingot",
+
+    "compressed",
+    "refined",
+
+    "treated",
+
+    "mechanical",
+
+    "precision"
+}
+
+
+-- ============================================================
+-- WORDS THAT INDICATE MACHINERY
+-- ============================================================
+
+local MACHINE_WORDS = {
+
+    "machine",
+    "factory",
+    "generator",
+    "crusher",
+    "enrichment",
+    "energized",
+
+    "smelter",
+    "infuser",
+
+    "separator",
+    "purification",
+    "chemical",
+
+    "digital",
+    "miner",
+
+    "controller",
+    "disk",
+    "drive",
+
+    "storage",
+    "interface",
+
+    "constructor",
+    "deconstructor",
+
+    "transmitter",
+    "receiver",
+
+    "tank",
+    "matrix",
+
+    "reactor",
+    "turbine"
+}
+
+
+-- ============================================================
+-- WORDS THAT INDICATE RARE / SPECIAL ITEMS
+-- ============================================================
+
+local RARE_WORDS = {
+
+    "ancient",
+    "relic",
+    "legendary",
+    "epic",
+    "rare",
+
+    "dragon",
+    "dinosaur",
+
+    "trophy",
+    "artifact",
+
+    "crown",
+    "mask",
+
+    "hat",
+    "cap",
+    "helmet",
+
+    "costume",
+    "clothing",
+
+    "outfit",
+    "dress",
+    "coat",
+
+    "wings",
+
+    "disc"
+}
+
+
+-- ============================================================
+-- CHECK WORD LIST
+-- ============================================================
+
+local function containsAny(text, words)
+
+    for _, word in ipairs(words) do
+
+        if contains(text, word) then
+            return true
+        end
+
     end
 
-    return item.tags[tag] == true
+    return false
 end
 
 
--- =========================================================
--- DETERMINE BASE VALUE
--- =========================================================
+-- ============================================================
+-- BASE VALUE
+-- ============================================================
 
 local function getBaseValue(item)
 
-    local name = item.name or ""
-    local path = name
+    local id = item.name or ""
+    local name = getItemName(id)
+    local namespace = getNamespace(id)
 
-    -- Remove mod namespace.
-    local itemName = string.match(name, ":(.+)$")
+    -- ========================================================
+    -- VANILLA EXACT VALUES
+    -- ========================================================
 
-    if not itemName then
-        itemName = name
-    end
+    if namespace == "minecraft" then
 
+        if VANILLA_RAW[name] ~= nil then
+            return VANILLA_RAW[name]
+        end
 
-    -- Exact common resources.
-    for material, price in pairs(BASE_PRICES) do
+        if VANILLA_COMMON[name] ~= nil then
+            return VANILLA_COMMON[name]
+        end
 
-        if itemName == material then
-            return price
+        if VANILLA_PROCESSED[name] ~= nil then
+            return VANILLA_PROCESSED[name]
         end
     end
 
 
-    -- =====================================================
-    -- VANILLA TAG BASED DETECTION
-    -- =====================================================
+    -- ========================================================
+    -- SPECIAL MODS
+    -- ========================================================
 
-    if hasTag(item, "minecraft:logs") then
-        return 0
-    end
-
-    if hasTag(item, "minecraft:planks") then
-        return 0
-    end
-
-    if hasTag(item, "minecraft:sand") then
-        return 0
-    end
-
-    if hasTag(item, "minecraft:dirt") then
-        return 0
-    end
-
-    if hasTag(item, "minecraft:stone_crafting_materials") then
-        return 0
-    end
+    local modMultiplier = MOD_MULTIPLIERS[namespace]
 
 
-    -- =====================================================
-    -- NAME BASED DETECTION
-    -- =====================================================
+    -- ========================================================
+    -- MODDED RAW MATERIAL
+    --
+    -- Still cheap, but more expensive than basic vanilla.
+    -- ========================================================
 
-    -- Extremely common materials.
-    if contains(itemName, "dirt")
-        or contains(itemName, "cobblestone")
-        or contains(itemName, "gravel")
-        or contains(itemName, "stone")
-        or contains(itemName, "sand") then
+    if namespace ~= "minecraft" then
 
-        return 0
+        if containsAny(name, RAW_WORDS) then
+
+            local value = 4
+
+            if modMultiplier then
+                value = math.floor(value * modMultiplier)
+            end
+
+            return math.max(value, MOD_MINIMUM)
+        end
+
     end
 
 
-    if contains(itemName, "wood")
-        or contains(itemName, "log")
-        or contains(itemName, "plank") then
+    -- ========================================================
+    -- PROCESSED ITEM
+    -- ========================================================
 
-        return 0
+    if containsAny(name, PROCESSED_WORDS) then
+
+        local value = 12
+
+        if modMultiplier then
+            value = math.floor(value * modMultiplier)
+        else
+            value = math.floor(value * 1.5)
+        end
+
+        return math.max(value, 8)
     end
 
 
-    -- Basic ores and materials.
-    if contains(itemName, "coal") then
-        return 1
-    end
+    -- ========================================================
+    -- MACHINERY
+    -- ========================================================
 
-    if contains(itemName, "iron") then
-        return 1
-    end
+    if containsAny(name, MACHINE_WORDS) then
 
-    if contains(itemName, "copper") then
-        return 1
-    end
+        local value = 64
 
-    if contains(itemName, "gold") then
-        return 2
-    end
+        if modMultiplier then
+            value = math.floor(value * modMultiplier)
+        else
+            value = value * 2
+        end
 
-    if contains(itemName, "redstone") then
-        return 1
-    end
-
-    if contains(itemName, "lapis") then
-        return 1
-    end
-
-    if contains(itemName, "quartz") then
-        return 2
+        return value
     end
 
 
-    -- Valuable materials.
-    if contains(itemName, "diamond") then
-        return 16
+    -- ========================================================
+    -- RARE / COLLECTIBLE ITEMS
+    -- ========================================================
+
+    if containsAny(name, RARE_WORDS) then
+
+        local value = 64
+
+        if modMultiplier then
+            value = math.floor(value * modMultiplier)
+        else
+            value = value * 2
+        end
+
+        return math.max(value, 64)
     end
 
-    if contains(itemName, "emerald") then
-        return 16
+
+    -- ========================================================
+    -- SPECIAL COSMETIC MODS
+    -- ========================================================
+
+    if namespace == "simplehats"
+        or namespace == "simple_hats"
+        or namespace == "selfexpression"
+        or namespace == "self_expression" then
+
+        return 256
     end
 
-    if contains(itemName, "netherite") then
-        return 64
-    end
 
-
-    -- =====================================================
+    -- ========================================================
     -- FOOD
-    -- =====================================================
+    -- ========================================================
 
-    if hasTag(item, "minecraft:food") then
-        return 1
-    end
+    if item.tags and item.tags["minecraft:food"] then
 
-    if contains(itemName, "bread")
-        or contains(itemName, "carrot")
-        or contains(itemName, "potato")
-        or contains(itemName, "apple") then
-
-        return 1
+        if namespace == "minecraft" then
+            return 1
+        else
+            return 4
+        end
     end
 
 
-    -- =====================================================
-    -- CREATE
-    -- =====================================================
+    -- ========================================================
+    -- WEAPONS / TOOLS
+    -- ========================================================
 
-    if contains(name, "create:") then
+    if contains(name, "sword")
+        or contains(name, "axe")
+        or contains(name, "pickaxe")
+        or contains(name, "shovel")
+        or contains(name, "hoe")
+        or contains(name, "bow")
+        or contains(name, "crossbow") then
 
-        -- Very simple Create components.
-        if contains(itemName, "shaft")
-            or contains(itemName, "cogwheel")
-            or contains(itemName, "large_cogwheel") then
-
-            return 0
-        end
-
-        -- Andesite alloy requires processing.
-        if contains(itemName, "andesite_alloy") then
-            return 2
-        end
-
-        -- Other Create items are considered processed.
-        return 4
-    end
-
-
-    -- =====================================================
-    -- MEKANISM
-    -- =====================================================
-
-    if contains(name, "mekanism:") then
-
-        -- Raw ores/materials.
-        if contains(itemName, "dust")
-            or contains(itemName, "clump")
-            or contains(itemName, "shard")
-            or contains(itemName, "crystal") then
-
-            return 2
-        end
-
-        -- Processed Mekanism components.
-        if contains(itemName, "alloy")
-            or contains(itemName, "circuit")
-            or contains(itemName, "pellet") then
-
+        if namespace == "minecraft" then
             return 8
-        end
-
-        -- Machines/components are expensive.
-        if contains(itemName, "machine")
-            or contains(itemName, "factory")
-            or contains(itemName, "generator") then
-
+        else
             return 32
         end
-
-        return 4
     end
 
 
-    -- =====================================================
-    -- CLOTHING / HATS
-    -- =====================================================
+    -- ========================================================
+    -- ARMOR
+    -- ========================================================
 
-    if contains(name, "simplehats")
-        or contains(name, "simple_hats")
-        or contains(name, "selfexpression")
-        or contains(name, "self_expression") then
+    if contains(name, "helmet")
+        or contains(name, "chestplate")
+        or contains(name, "leggings")
+        or contains(name, "boots") then
 
-        -- Cosmetic items are valuable because they are
-        -- collectible and not basic resources.
-        return 64
+        if namespace == "minecraft" then
+            return 12
+        else
+            return 48
+        end
     end
 
 
-    -- =====================================================
-    -- ENCHANTED ITEMS
-    -- =====================================================
+    -- ========================================================
+    -- UNKNOWN MOD ITEM
+    --
+    -- IMPORTANT:
+    -- Never give an unknown mod item a vanilla price.
+    -- ========================================================
 
+    if namespace ~= "minecraft" then
+
+        if modMultiplier then
+            return math.floor(8 * modMultiplier)
+        end
+
+        return MOD_MINIMUM
+    end
+
+
+    -- ========================================================
+    -- UNKNOWN VANILLA ITEM
+    -- ========================================================
+
+    return VANILLA_MINIMUM
+end
+
+
+-- ============================================================
+-- COMPLEXITY
+-- ============================================================
+
+local function getComplexity(item)
+
+    local id = item.name or ""
+    local name = getItemName(id)
+    local namespace = getNamespace(id)
+
+    local score = 0
+
+
+    -- Modded items automatically start above vanilla.
+    if namespace ~= "minecraft" then
+        score = score + 1
+    end
+
+
+    -- Create
+    if namespace == "create" then
+        score = score + 2
+    end
+
+
+    -- Mekanism
+    if namespace == "mekanism" then
+        score = score + 3
+    end
+
+
+    -- Refined Storage
+    if namespace == "refinedstorage" then
+        score = score + 2
+    end
+
+
+    -- Complex words
+    if containsAny(name, PROCESSED_WORDS) then
+        score = score + 2
+    end
+
+
+    if containsAny(name, MACHINE_WORDS) then
+        score = score + 4
+    end
+
+
+    -- Rare items
+    if containsAny(name, RARE_WORDS) then
+        score = score + 4
+    end
+
+
+    -- Enchantments
     if item.enchantments then
 
-        local enchantCount = #item.enchantments
+        local count = #item.enchantments
 
-        if enchantCount > 0 then
-            return 32 + enchantCount * 16
+        if count > 0 then
+            score = score + count * 2
         end
+
     end
 
 
-    -- =====================================================
-    -- TOOLS / WEAPONS / ARMOUR
-    -- =====================================================
-
-    if contains(itemName, "sword")
-        or contains(itemName, "axe")
-        or contains(itemName, "pickaxe")
-        or contains(itemName, "shovel")
-        or contains(itemName, "hoe")
-        or contains(itemName, "bow")
-        or contains(itemName, "crossbow") then
-
-        return 16
-    end
-
-
-    if contains(itemName, "helmet")
-        or contains(itemName, "chestplate")
-        or contains(itemName, "leggings")
-        or contains(itemName, "boots") then
-
-        return 24
-    end
-
-
-    -- =====================================================
-    -- UNKNOWN MODDED ITEM
-    -- =====================================================
-
-    -- Unknown items are NOT automatically expensive.
-    -- We give them a small default value.
-    return 2
+    return score
 end
 
 
--- =========================================================
--- COMPLEXITY MODIFIER
--- =========================================================
-
-local function getComplexityMultiplier(item)
-
-    local name = item.name or ""
-    local itemName = string.match(name, ":(.+)$") or name
-
-    local multiplier = 1
-
-
-    -- Create processed items.
-    if contains(name, "create:") then
-
-        if contains(itemName, "machine")
-            or contains(itemName, "contraption")
-            or contains(itemName, "assembly") then
-
-            multiplier = multiplier + 2
-        end
-    end
-
-
-    -- Mekanism advanced items.
-    if contains(name, "mekanism:") then
-
-        if contains(itemName, "ultimate")
-            or contains(itemName, "elite")
-            or contains(itemName, "advanced") then
-
-            multiplier = multiplier + 2
-        end
-    end
-
-
-    -- Rare-looking / special items.
-    if contains(itemName, "rare")
-        or contains(itemName, "legendary")
-        or contains(itemName, "ancient")
-        or contains(itemName, "relic") then
-
-        multiplier = multiplier + 2
-    end
-
-
-    return multiplier
-end
-
-
--- =========================================================
--- CALCULATE PRICE
--- =========================================================
+-- ============================================================
+-- FINAL PRICE
+-- ============================================================
 
 local function calculatePrice(item)
 
     local base = getBaseValue(item)
 
-    if base <= 0 then
-        return 0
+    local complexity = getComplexity(item)
+
+    local price = base
+
+
+    -- Complexity bonus.
+    if complexity >= 2 then
+        price = price * 1.25
     end
 
-    local multiplier = getComplexityMultiplier(item)
+    if complexity >= 4 then
+        price = price * 1.5
+    end
 
-    local price = math.floor(base * multiplier)
+    if complexity >= 6 then
+        price = price * 2
+    end
+
+    if complexity >= 8 then
+        price = price * 3
+    end
+
+
+    -- Round down to an integer.
+    price = math.floor(price)
+
+
+    -- ========================================================
+    -- PRICE FLOOR
+    -- ========================================================
+
+    local namespace = getNamespace(item.name)
+
+    if namespace ~= "minecraft" then
+
+        if price < MOD_MINIMUM then
+            price = MOD_MINIMUM
+        end
+
+    else
+
+        if price < VANILLA_MINIMUM then
+            price = VANILLA_MINIMUM
+        end
+
+    end
+
 
     return price
 end
 
 
--- =========================================================
+-- ============================================================
 -- DISPLAY
--- =========================================================
+-- ============================================================
 
 local function clear()
 
@@ -476,18 +829,29 @@ local function showItem(item)
 
     clear()
 
+    local id = item.name or ""
+    local namespace = getNamespace(id)
+
+    local price = calculatePrice(item)
+    local total = price * item.count
+
     print("================================")
     print("        MARKET APPRAISER")
     print("================================")
     print()
 
     print("Item:")
-    print(item.displayName or item.name)
+    print(item.displayName or id)
 
     print()
 
     print("ID:")
-    print(item.name)
+    print(id)
+
+    print()
+
+    print("Mod:")
+    print(namespace)
 
     print()
 
@@ -495,10 +859,6 @@ local function showItem(item)
     print(item.count)
 
     print()
-
-    local price = calculatePrice(item)
-    local total = price * item.count
-
     print("--------------------------------")
     print("ESTIMATED VALUE")
     print("--------------------------------")
@@ -509,16 +869,19 @@ local function showItem(item)
 
     print()
 
-    print("Entire stack:")
+    print("Total:")
     print(formatMoney(total))
 
     print()
 
-    if price == 0 then
-        print("This item has no economic value.")
+    print("--------------------------------")
+
+    if namespace == "minecraft" then
+        print("Category: VANILLA")
     else
-        print("Estimated automatically.")
+        print("Category: MODDED")
     end
+
 
     if DEBUG then
 
@@ -526,39 +889,42 @@ local function showItem(item)
         print("--------------------------------")
         print("DEBUG")
         print("--------------------------------")
+
         print("Base:")
         print(getBaseValue(item))
-        print("Multiplier:")
-        print(getComplexityMultiplier(item))
+
+        print("Complexity:")
+        print(getComplexity(item))
 
     end
 end
 
 
--- =========================================================
+-- ============================================================
 -- GET FIRST ITEM
--- =========================================================
+-- ============================================================
 
 local function getFirstItem()
 
     local items = inventory.list()
 
-    for slot, basic in pairs(items) do
+    for slot, data in pairs(items) do
 
         local detail = inventory.getItemDetail(slot)
 
         if detail then
             return detail
         end
+
     end
 
     return nil
 end
 
 
--- =========================================================
+-- ============================================================
 -- MAIN LOOP
--- =========================================================
+-- ============================================================
 
 local lastID = nil
 
@@ -568,7 +934,10 @@ while true do
 
     if not item then
 
-        clear()
+        if lastID ~= nil then
+
+            clear()
+        end
 
         print("================================")
         print("        MARKET APPRAISER")
