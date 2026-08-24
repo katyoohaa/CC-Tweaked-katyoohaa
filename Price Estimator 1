@@ -1,9 +1,8 @@
 -- ============================================================
--- MARKET APPRAISER v2
+-- MARKET APPRAISER v3
 -- CC:Tweaked 1.20.1
 --
--- Put an item into the connected barrel.
--- The computer automatically estimates its value.
+-- Automatic economy appraisal system
 --
 -- Currency:
 -- 1 Spur      = 1
@@ -16,7 +15,7 @@
 
 
 -- ============================================================
--- FIND INVENTORY
+-- INVENTORY
 -- ============================================================
 
 local inventory = peripheral.find("inventory")
@@ -32,16 +31,17 @@ end
 
 local DEBUG = true
 
--- Minimum price for an unknown MOD item.
--- Modded items should never be cheaper than basic vanilla items.
-local MOD_MINIMUM = 4
+-- Prices are in Spur.
 
--- Minimum price for an unknown VANILLA item.
-local VANILLA_MINIMUM = 1
+local PRICE_CHEAP = 1
+local PRICE_NORMAL = 4
+local PRICE_MEDIUM = 16
+local PRICE_EXPENSIVE = 64
+local PRICE_VERY_EXPENSIVE = 256
 
 
 -- ============================================================
--- CURRENCY
+-- CURRENCY FORMAT
 -- ============================================================
 
 local function formatMoney(value)
@@ -65,407 +65,48 @@ local function formatMoney(value)
     local bevel = math.floor(value / 8)
     local spur = value % 8
 
-    local parts = {}
+    local result = {}
 
     if sun > 0 then
-        table.insert(parts, sun .. " Sun")
+        table.insert(result, sun .. " Sun")
     end
 
     if crown > 0 then
-        table.insert(parts, crown .. " Crown")
+        table.insert(result, crown .. " Crown")
     end
 
     if cog > 0 then
-        table.insert(parts, cog .. " Cog")
+        table.insert(result, cog .. " Cog")
     end
 
     if sprocket > 0 then
-        table.insert(parts, sprocket .. " Sprocket")
+        table.insert(result, sprocket .. " Sprocket")
     end
 
     if bevel > 0 then
-        table.insert(parts, bevel .. " Bevel")
+        table.insert(result, bevel .. " Bevel")
     end
 
     if spur > 0 then
-        table.insert(parts, spur .. " Spur")
+        table.insert(result, spur .. " Spur")
     end
 
-    return table.concat(parts, " + ")
+    return table.concat(result, " + ")
 end
 
 
 -- ============================================================
--- TEXT HELPERS
+-- STRING HELPERS
 -- ============================================================
 
-local function contains(text, value)
+local function contains(text, word)
 
-    return string.find(
-        string.lower(text or ""),
-        string.lower(value),
-        1,
-        true
-    ) ~= nil
+    text = string.lower(text or "")
+    word = string.lower(word)
 
+    return string.find(text, word, 1, true) ~= nil
 end
 
-
-local function getNamespace(id)
-
-    return string.match(id or "", "^([^:]+):") or "minecraft"
-
-end
-
-
-local function getItemName(id)
-
-    return string.match(id or "", "^[^:]+:(.+)$") or id
-
-end
-
-
--- ============================================================
--- VANILLA RAW MATERIALS
---
--- These are intentionally VERY cheap.
--- ============================================================
-
-local VANILLA_RAW = {
-
-    dirt = 0,
-    grass_block = 0,
-    sand = 0,
-    red_sand = 0,
-    gravel = 0,
-    clay_ball = 0,
-    cobblestone = 0,
-    stone = 0,
-    netherrack = 0,
-    end_stone = 0,
-
-    oak_log = 0,
-    spruce_log = 0,
-    birch_log = 0,
-    jungle_log = 0,
-    acacia_log = 0,
-    dark_oak_log = 0,
-    mangrove_log = 0,
-    cherry_log = 0,
-
-    oak_planks = 0,
-    spruce_planks = 0,
-    birch_planks = 0,
-    jungle_planks = 0,
-    acacia_planks = 0,
-    dark_oak_planks = 0,
-    mangrove_planks = 0,
-    cherry_planks = 0,
-
-    stick = 0,
-
-    coal = 1,
-    iron_ingot = 1,
-    copper_ingot = 1,
-    gold_ingot = 2,
-
-    redstone = 1,
-    lapis_lazuli = 1,
-    quartz = 2,
-
-    diamond = 16,
-    emerald = 16,
-
-    netherite_scrap = 32,
-    netherite_ingot = 128
-}
-
-
--- ============================================================
--- VERY COMMON VANILLA ITEMS
--- ============================================================
-
-local VANILLA_COMMON = {
-
-    torch = 1,
-    paper = 1,
-    book = 2,
-
-    glass = 1,
-    glass_pane = 1,
-
-    brick = 1,
-    stone_bricks = 1,
-
-    iron_nugget = 1,
-    gold_nugget = 1,
-
-    leather = 1,
-    string = 1,
-
-    bone = 1,
-    feather = 1,
-
-    flint = 1,
-
-    wheat = 1,
-    wheat_seeds = 0,
-
-    carrot = 1,
-    potato = 1,
-    beetroot = 1,
-    apple = 1,
-
-    bread = 1,
-
-    cooked_beef = 2,
-    cooked_porkchop = 2,
-    cooked_chicken = 2,
-    cooked_mutton = 2,
-    cooked_rabbit = 2,
-
-    bucket = 4,
-    water_bucket = 4,
-    lava_bucket = 8
-}
-
-
--- ============================================================
--- VANILLA PROCESSED ITEMS
---
--- More expensive than raw materials,
--- but still cheaper than complex modded machinery.
--- ============================================================
-
-local VANILLA_PROCESSED = {
-
-    iron_block = 9,
-    gold_block = 18,
-    copper_block = 9,
-
-    diamond_block = 144,
-    emerald_block = 144,
-
-    obsidian = 4,
-
-    piston = 8,
-    sticky_piston = 12,
-
-    dispenser = 8,
-    dropper = 6,
-
-    hopper = 12,
-
-    observer = 8,
-
-    comparator = 8,
-    repeater = 4,
-
-    enchanting_table = 64,
-
-    anvil = 48,
-
-    brewing_stand = 16,
-
-    beacon = 512
-}
-
-
--- ============================================================
--- MODS THAT ARE PART OF YOUR SERVER
---
--- These receive an automatic price multiplier.
--- ============================================================
-
-local MOD_MULTIPLIERS = {
-
-    create = 2.5,
-
-    mekanism = 3.5,
-
-    refinedstorage = 3.0,
-    rs = 3.0,
-
-    advancedperipherals = 3.0,
-    computercraft = 2.5,
-
-    simplehats = 5.0,
-    selfexpression = 5.0,
-
-    alexsmobs = 3.0,
-    iceandfire = 4.0,
-
-    fossilsarcheology = 4.0,
-
-    lootr = 2.0,
-
-    farmersdelight = 1.5,
-    farmersdelight = 1.5,
-
-    growthcraft = 2.0
-}
-
-
--- ============================================================
--- WORDS THAT INDICATE SIMPLE RAW MATERIAL
--- ============================================================
-
-local RAW_WORDS = {
-
-    "dust",
-    "ore",
-    "raw_",
-    "_raw",
-
-    "ingot",
-    "nugget",
-
-    "gem",
-
-    "log",
-    "wood",
-    "plank",
-
-    "stone",
-    "cobble",
-
-    "sand",
-    "gravel",
-
-    "dirt",
-
-    "leaves",
-    "leaf",
-
-    "seeds",
-    "seed",
-
-    "wheat",
-
-    "fiber",
-    "fibers",
-
-    "crop"
-}
-
-
--- ============================================================
--- WORDS THAT INDICATE PROCESSED MATERIAL
--- ============================================================
-
-local PROCESSED_WORDS = {
-
-    "alloy",
-    "plate",
-    "rod",
-    "gear",
-    "component",
-
-    "wire",
-    "circuit",
-
-    "crystal",
-    "clump",
-    "shard",
-
-    "ingot",
-
-    "compressed",
-    "refined",
-
-    "treated",
-
-    "mechanical",
-
-    "precision"
-}
-
-
--- ============================================================
--- WORDS THAT INDICATE MACHINERY
--- ============================================================
-
-local MACHINE_WORDS = {
-
-    "machine",
-    "factory",
-    "generator",
-    "crusher",
-    "enrichment",
-    "energized",
-
-    "smelter",
-    "infuser",
-
-    "separator",
-    "purification",
-    "chemical",
-
-    "digital",
-    "miner",
-
-    "controller",
-    "disk",
-    "drive",
-
-    "storage",
-    "interface",
-
-    "constructor",
-    "deconstructor",
-
-    "transmitter",
-    "receiver",
-
-    "tank",
-    "matrix",
-
-    "reactor",
-    "turbine"
-}
-
-
--- ============================================================
--- WORDS THAT INDICATE RARE / SPECIAL ITEMS
--- ============================================================
-
-local RARE_WORDS = {
-
-    "ancient",
-    "relic",
-    "legendary",
-    "epic",
-    "rare",
-
-    "dragon",
-    "dinosaur",
-
-    "trophy",
-    "artifact",
-
-    "crown",
-    "mask",
-
-    "hat",
-    "cap",
-    "helmet",
-
-    "costume",
-    "clothing",
-
-    "outfit",
-    "dress",
-    "coat",
-
-    "wings",
-
-    "disc"
-}
-
-
--- ============================================================
--- CHECK WORD LIST
--- ============================================================
 
 local function containsAny(text, words)
 
@@ -481,335 +122,954 @@ local function containsAny(text, words)
 end
 
 
--- ============================================================
--- BASE VALUE
--- ============================================================
+local function getNamespace(id)
 
-local function getBaseValue(item)
-
-    local id = item.name or ""
-    local name = getItemName(id)
-    local namespace = getNamespace(id)
-
-    -- ========================================================
-    -- VANILLA EXACT VALUES
-    -- ========================================================
-
-    if namespace == "minecraft" then
-
-        if VANILLA_RAW[name] ~= nil then
-            return VANILLA_RAW[name]
-        end
-
-        if VANILLA_COMMON[name] ~= nil then
-            return VANILLA_COMMON[name]
-        end
-
-        if VANILLA_PROCESSED[name] ~= nil then
-            return VANILLA_PROCESSED[name]
-        end
-    end
+    return string.match(id or "", "^([^:]+):") or "minecraft"
+end
 
 
-    -- ========================================================
-    -- SPECIAL MODS
-    -- ========================================================
+local function getItemName(id)
 
-    local modMultiplier = MOD_MULTIPLIERS[namespace]
-
-
-    -- ========================================================
-    -- MODDED RAW MATERIAL
-    --
-    -- Still cheap, but more expensive than basic vanilla.
-    -- ========================================================
-
-    if namespace ~= "minecraft" then
-
-        if containsAny(name, RAW_WORDS) then
-
-            local value = 4
-
-            if modMultiplier then
-                value = math.floor(value * modMultiplier)
-            end
-
-            return math.max(value, MOD_MINIMUM)
-        end
-
-    end
-
-
-    -- ========================================================
-    -- PROCESSED ITEM
-    -- ========================================================
-
-    if containsAny(name, PROCESSED_WORDS) then
-
-        local value = 12
-
-        if modMultiplier then
-            value = math.floor(value * modMultiplier)
-        else
-            value = math.floor(value * 1.5)
-        end
-
-        return math.max(value, 8)
-    end
-
-
-    -- ========================================================
-    -- MACHINERY
-    -- ========================================================
-
-    if containsAny(name, MACHINE_WORDS) then
-
-        local value = 64
-
-        if modMultiplier then
-            value = math.floor(value * modMultiplier)
-        else
-            value = value * 2
-        end
-
-        return value
-    end
-
-
-    -- ========================================================
-    -- RARE / COLLECTIBLE ITEMS
-    -- ========================================================
-
-    if containsAny(name, RARE_WORDS) then
-
-        local value = 64
-
-        if modMultiplier then
-            value = math.floor(value * modMultiplier)
-        else
-            value = value * 2
-        end
-
-        return math.max(value, 64)
-    end
-
-
-    -- ========================================================
-    -- SPECIAL COSMETIC MODS
-    -- ========================================================
-
-    if namespace == "simplehats"
-        or namespace == "simple_hats"
-        or namespace == "selfexpression"
-        or namespace == "self_expression" then
-
-        return 256
-    end
-
-
-    -- ========================================================
-    -- FOOD
-    -- ========================================================
-
-    if item.tags and item.tags["minecraft:food"] then
-
-        if namespace == "minecraft" then
-            return 1
-        else
-            return 4
-        end
-    end
-
-
-    -- ========================================================
-    -- WEAPONS / TOOLS
-    -- ========================================================
-
-    if contains(name, "sword")
-        or contains(name, "axe")
-        or contains(name, "pickaxe")
-        or contains(name, "shovel")
-        or contains(name, "hoe")
-        or contains(name, "bow")
-        or contains(name, "crossbow") then
-
-        if namespace == "minecraft" then
-            return 8
-        else
-            return 32
-        end
-    end
-
-
-    -- ========================================================
-    -- ARMOR
-    -- ========================================================
-
-    if contains(name, "helmet")
-        or contains(name, "chestplate")
-        or contains(name, "leggings")
-        or contains(name, "boots") then
-
-        if namespace == "minecraft" then
-            return 12
-        else
-            return 48
-        end
-    end
-
-
-    -- ========================================================
-    -- UNKNOWN MOD ITEM
-    --
-    -- IMPORTANT:
-    -- Never give an unknown mod item a vanilla price.
-    -- ========================================================
-
-    if namespace ~= "minecraft" then
-
-        if modMultiplier then
-            return math.floor(8 * modMultiplier)
-        end
-
-        return MOD_MINIMUM
-    end
-
-
-    -- ========================================================
-    -- UNKNOWN VANILLA ITEM
-    -- ========================================================
-
-    return VANILLA_MINIMUM
+    return string.match(id or "", "^[^:]+:(.+)$") or id
 end
 
 
 -- ============================================================
--- COMPLEXITY
+-- CATEGORY NAMES
 -- ============================================================
 
-local function getComplexity(item)
+local CATEGORY = {
 
-    local id = item.name or ""
-    local name = getItemName(id)
-    local namespace = getNamespace(id)
+    CHEAP = "CHEAP",
+
+    NORMAL = "NORMAL",
+
+    MEDIUM = "MEDIUM",
+
+    EXPENSIVE = "EXPENSIVE",
+
+    VERY_EXPENSIVE = "VERY EXPENSIVE"
+
+}
+
+
+-- ============================================================
+-- VERY CHEAP MINECRAFT MATERIALS
+-- ============================================================
+
+local cheapMaterials = {
+
+    "dirt",
+    "grass_block",
+
+    "stone",
+    "cobblestone",
+
+    "sand",
+    "red_sand",
+    "gravel",
+
+    "clay_ball",
+
+    "netherrack",
+    "end_stone",
+
+    "snowball",
+
+    "stick",
+
+    "flint",
+
+    "feather",
+
+    "bone",
+
+    "rotten_flesh",
+
+    "string",
+
+    "spider_eye",
+
+    "gunpowder",
+
+    "leather",
+
+    "ink_sac",
+
+    "slime_ball",
+
+    "wheat",
+    "wheat_seeds",
+
+    "carrot",
+    "potato",
+    "beetroot",
+    "beetroot_seeds",
+
+    "pumpkin_seeds",
+    "melon_seeds",
+
+    "sugar_cane",
+
+    "cactus",
+
+    "kelp",
+
+    "bamboo",
+
+    "vine",
+
+    "moss",
+
+    "moss_block"
+}
+
+
+-- ============================================================
+-- CHEAP MINECRAFT MATERIALS
+-- ============================================================
+
+local cheapResources = {
+
+    "coal",
+    "iron_ingot",
+    "copper_ingot",
+
+    "redstone",
+    "lapis_lazuli",
+
+    "quartz",
+
+    "glass",
+
+    "paper",
+
+    "book",
+
+    "leather",
+
+    "brick",
+
+    "clay",
+
+    "wood",
+
+    "log",
+
+    "planks",
+
+    "leaves"
+}
+
+
+-- ============================================================
+-- RARE VANILLA MATERIALS
+-- ============================================================
+
+local rareVanilla = {
+
+    "diamond",
+    "emerald",
+
+    "obsidian",
+
+    "crying_obsidian",
+
+    "ancient_debris",
+    "netherite_scrap",
+    "netherite_ingot",
+
+    "echo_shard",
+
+    "heart_of_the_sea",
+
+    "nautilus_shell",
+
+    "shulker_shell",
+
+    "dragon_breath",
+
+    "totem_of_undying",
+
+    "phantom_membrane",
+
+    "prismarine_shard",
+    "prismarine_crystals"
+}
+
+
+-- ============================================================
+-- BASIC TOOLS
+-- ============================================================
+
+local basicTools = {
+
+    "wooden_sword",
+    "wooden_pickaxe",
+    "wooden_axe",
+    "wooden_shovel",
+    "wooden_hoe",
+
+    "stone_sword",
+    "stone_pickaxe",
+    "stone_axe",
+    "stone_shovel",
+    "stone_hoe",
+
+    "iron_sword",
+    "iron_pickaxe",
+    "iron_axe",
+    "iron_shovel",
+    "iron_hoe",
+
+    "golden_sword",
+    "golden_pickaxe",
+    "golden_axe",
+    "golden_shovel",
+    "golden_hoe",
+
+    "diamond_sword",
+    "diamond_pickaxe",
+    "diamond_axe",
+    "diamond_shovel",
+    "diamond_hoe",
+
+    "shears",
+    "fishing_rod",
+
+    "bow",
+    "crossbow"
+}
+
+
+-- ============================================================
+-- BASIC ARMOR
+-- ============================================================
+
+local basicArmor = {
+
+    "leather_helmet",
+    "leather_chestplate",
+    "leather_leggings",
+    "leather_boots",
+
+    "chainmail_helmet",
+    "chainmail_chestplate",
+    "chainmail_leggings",
+    "chainmail_boots",
+
+    "iron_helmet",
+    "iron_chestplate",
+    "iron_leggings",
+    "iron_boots",
+
+    "golden_helmet",
+    "golden_chestplate",
+    "golden_leggings",
+    "golden_boots",
+
+    "diamond_helmet",
+    "diamond_chestplate",
+    "diamond_leggings",
+    "diamond_boots",
+
+    "turtle_helmet"
+}
+
+
+-- ============================================================
+-- BASIC CRAFTING ITEMS
+-- ============================================================
+
+local basicCrafts = {
+
+    "book",
+
+    "writable_book",
+
+    "paper",
+
+    "stick",
+
+    "bowl",
+
+    "bucket",
+
+    "iron_nugget",
+
+    "gold_nugget",
+
+    "torch",
+
+    "chest",
+
+    "barrel",
+
+    "crafting_table",
+
+    "furnace",
+
+    "stonecutter",
+
+    "anvil"
+}
+
+
+-- ============================================================
+-- MODDED SIMPLE CRAFT WORDS
+-- ============================================================
+
+local simpleModCrafts = {
+
+    "plate",
+    "rod",
+    "gear",
+    "cogwheel",
+
+    "shaft",
+
+    "wire",
+
+    "dust",
+
+    "nugget",
+
+    "ingot",
+
+    "component",
+
+    "alloy",
+
+    "crystal",
+
+    "shard",
+
+    "clump"
+}
+
+
+-- ============================================================
+-- MODDED MECHANISMS
+-- ============================================================
+
+local mechanisms = {
+
+    "machine",
+    "factory",
+
+    "generator",
+
+    "crusher",
+    "enrichment",
+    "smelter",
+
+    "infuser",
+
+    "separator",
+
+    "purification",
+
+    "chemical",
+
+    "energized",
+
+    "metallurgic",
+
+    "digital_miner",
+
+    "miner",
+
+    "constructor",
+    "deconstructor",
+
+    "controller",
+
+    "interface",
+
+    "importer",
+    "exporter",
+
+    "disk",
+    "drive",
+
+    "storage",
+
+    "transmitter",
+    "receiver",
+
+    "reactor",
+    "turbine",
+
+    "teleporter",
+
+    "laser",
+
+    "quantum",
+
+    "ultimate"
+}
+
+
+-- ============================================================
+-- MODDED WEAPONS
+-- ============================================================
+
+local modWeapons = {
+
+    "sword",
+    "greatsword",
+    "dagger",
+    "spear",
+    "halberd",
+    "katana",
+
+    "gun",
+    "rifle",
+    "pistol",
+    "shotgun",
+
+    "blaster",
+    "cannon",
+
+    "weapon"
+}
+
+
+-- ============================================================
+-- MODDED ARMOR / CLOTHING
+-- ============================================================
+
+local modArmor = {
+
+    "helmet",
+    "chestplate",
+    "leggings",
+    "boots",
+
+    "armor",
+    "armour",
+
+    "clothing",
+    "outfit",
+    "costume",
+
+    "dress",
+    "coat",
+    "shirt",
+    "pants",
+
+    "gloves",
+
+    "hat",
+    "cap",
+    "mask"
+}
+
+
+-- ============================================================
+-- MODDED FOOD
+-- ============================================================
+
+local modFoodWords = {
+
+    "meal",
+    "stew",
+    "soup",
+    "sandwich",
+
+    "burger",
+    "pizza",
+
+    "cake",
+
+    "pie",
+
+    "food",
+
+    "dish",
+
+    "salad"
+}
+
+
+-- ============================================================
+-- IMPORTANT ENCHANTMENT BOOKS
+-- ============================================================
+
+local importantEnchantments = {
+
+    "mending",
+
+    "silk_touch",
+
+    "fortune",
+
+    "looting",
+
+    "sharpness",
+
+    "protection",
+
+    "efficiency",
+
+    "unbreaking",
+
+    "power",
+
+    "infinity",
+
+    "feather_falling",
+
+    "respiration",
+
+    "depth_strider",
+
+    "frost_walker",
+
+    "sweeping",
+
+    "thorns"
+}
+
+
+-- ============================================================
+-- RARE MOB DROPS
+-- ============================================================
+
+local rareDropWords = {
+
+    "scale",
+    "scales",
+
+    "claw",
+    "fang",
+
+    "tooth",
+
+    "horn",
+
+    "tusk",
+
+    "heart",
+
+    "eye",
+
+    "essence",
+
+    "soul",
+
+    "trophy",
+
+    "skull",
+
+    "bone",
+
+    "hide",
+
+    "shell",
+
+    "feather",
+
+    "wing",
+
+    "dragon",
+
+    "dinosaur",
+
+    "relic",
+
+    "artifact",
+
+    "amulet"
+}
+
+
+-- ============================================================
+-- PHOTOGRAPHS / PAINTINGS
+-- ============================================================
+
+local artWords = {
+
+    "photo",
+    "photograph",
+    "picture",
+
+    "painting",
+
+    "canvas",
+
+    "portrait",
+
+    "art",
+
+    "image"
+}
+
+
+-- ============================================================
+-- HATS
+-- ============================================================
+
+local hatWords = {
+
+    "hat",
+    "cap",
+    "headwear",
+    "headgear"
+}
+
+
+-- ============================================================
+-- DETECT MOD TYPE
+-- ============================================================
+
+local function isModded(item)
+
+    return getNamespace(item.name) ~= "minecraft"
+
+end
+
+
+-- ============================================================
+-- DETECT ENCHANTMENTS
+-- ============================================================
+
+local function getEnchantmentScore(item)
+
+    if not item.enchantments then
+        return 0
+    end
 
     local score = 0
 
+    for _, enchantment in pairs(item.enchantments) do
 
-    -- Modded items automatically start above vanilla.
-    if namespace ~= "minecraft" then
-        score = score + 1
-    end
+        local level = enchantment.level or 1
 
+        local name = string.lower(enchantment.name or "")
 
-    -- Create
-    if namespace == "create" then
-        score = score + 2
-    end
+        local important = false
 
+        for _, word in ipairs(importantEnchantments) do
 
-    -- Mekanism
-    if namespace == "mekanism" then
-        score = score + 3
-    end
+            if contains(name, word) then
+                important = true
+                break
+            end
 
+        end
 
-    -- Refined Storage
-    if namespace == "refinedstorage" then
-        score = score + 2
-    end
+        if important then
 
+            score = score + 20 + (level * 15)
 
-    -- Complex words
-    if containsAny(name, PROCESSED_WORDS) then
-        score = score + 2
-    end
+        else
 
+            score = score + 5 + (level * 5)
 
-    if containsAny(name, MACHINE_WORDS) then
-        score = score + 4
-    end
-
-
-    -- Rare items
-    if containsAny(name, RARE_WORDS) then
-        score = score + 4
-    end
-
-
-    -- Enchantments
-    if item.enchantments then
-
-        local count = #item.enchantments
-
-        if count > 0 then
-            score = score + count * 2
         end
 
     end
-
 
     return score
 end
 
 
 -- ============================================================
--- FINAL PRICE
+-- VANILLA MOB DROP DETECTION
 -- ============================================================
 
-local function calculatePrice(item)
+local function isCommonVanillaDrop(name)
 
-    local base = getBaseValue(item)
+    local drops = {
 
-    local complexity = getComplexity(item)
+        "rotten_flesh",
+        "bone",
+        "arrow",
+        "string",
+        "spider_eye",
+        "gunpowder",
+        "feather",
+        "leather",
+        "ink_sac",
+        "slime_ball",
+        "magma_cream",
+        "blaze_rod"
+    }
 
-    local price = base
+    for _, drop in ipairs(drops) do
 
-
-    -- Complexity bonus.
-    if complexity >= 2 then
-        price = price * 1.25
-    end
-
-    if complexity >= 4 then
-        price = price * 1.5
-    end
-
-    if complexity >= 6 then
-        price = price * 2
-    end
-
-    if complexity >= 8 then
-        price = price * 3
-    end
-
-
-    -- Round down to an integer.
-    price = math.floor(price)
-
-
-    -- ========================================================
-    -- PRICE FLOOR
-    -- ========================================================
-
-    local namespace = getNamespace(item.name)
-
-    if namespace ~= "minecraft" then
-
-        if price < MOD_MINIMUM then
-            price = MOD_MINIMUM
+        if name == drop then
+            return true
         end
+
+    end
+
+    return false
+end
+
+
+-- ============================================================
+-- MAIN CATEGORY DETECTION
+-- ============================================================
+
+local function evaluateItem(item)
+
+    local id = item.name or ""
+    local name = getItemName(id)
+    local namespace = getNamespace(id)
+
+    local lowerName = string.lower(name)
+
+    local price = PRICE_CHEAP
+    local category = CATEGORY.CHEAP
+    local reason = "Basic resource"
+
+
+    -- ========================================================
+    -- VANILLA
+    -- ========================================================
+
+    if namespace == "minecraft" then
+
+        -- Cheap raw materials.
+        if containsAny(lowerName, cheapMaterials) then
+
+            price = PRICE_CHEAP
+            category = CATEGORY.CHEAP
+            reason = "Easy to obtain material"
+
+        -- Cheap common resources.
+        elseif containsAny(lowerName, cheapResources) then
+
+            price = 2
+            category = CATEGORY.CHEAP
+            reason = "Common Minecraft resource"
+
+        -- Basic crafting items.
+        elseif containsAny(lowerName, basicCrafts) then
+
+            price = 2
+            category = CATEGORY.CHEAP
+            reason = "Basic crafting component"
+
+        -- Basic tools.
+        elseif containsAny(lowerName, basicTools) then
+
+            price = 4
+            category = CATEGORY.CHEAP
+            reason = "Unenchanted basic tool"
+
+        -- Basic armor.
+        elseif containsAny(lowerName, basicArmor) then
+
+            price = PRICE_NORMAL
+            category = CATEGORY.NORMAL
+            reason = "Basic armor"
+
+        -- Rare vanilla materials.
+        elseif containsAny(lowerName, rareVanilla) then
+
+            price = PRICE_MEDIUM
+            category = CATEGORY.MEDIUM
+            reason = "Rare Minecraft material"
+
+        -- Vanilla food.
+        elseif item.tags and item.tags["minecraft:food"] then
+
+            price = PRICE_CHEAP
+            category = CATEGORY.CHEAP
+            reason = "Basic food"
+
+        -- Common vanilla mob drops.
+        elseif isCommonVanillaDrop(lowerName) then
+
+            price = PRICE_CHEAP
+            category = CATEGORY.CHEAP
+            reason = "Common Minecraft mob drop"
+
+        else
+
+            price = PRICE_CHEAP
+            category = CATEGORY.CHEAP
+            reason = "Common Minecraft item"
+
+        end
+
+
+    -- ========================================================
+    -- MODDED ITEMS
+    -- ========================================================
 
     else
 
-        if price < VANILLA_MINIMUM then
-            price = VANILLA_MINIMUM
+        -- ----------------------------------------------------
+        -- ART
+        -- ----------------------------------------------------
+
+        if containsAny(lowerName, artWords) then
+
+            price = PRICE_VERY_EXPENSIVE
+            category = CATEGORY.VERY_EXPENSIVE
+            reason = "Photography / modded art"
+
+
+        -- ----------------------------------------------------
+        -- CLOTHING / MOD ARMOR
+        -- ----------------------------------------------------
+
+        elseif containsAny(lowerName, modArmor) then
+
+            price = PRICE_VERY_EXPENSIVE
+            category = CATEGORY.VERY_EXPENSIVE
+            reason = "Modded clothing / armor"
+
+
+        -- ----------------------------------------------------
+        -- HATS
+        -- ----------------------------------------------------
+
+        elseif containsAny(lowerName, hatWords) then
+
+            price = PRICE_EXPENSIVE
+            category = CATEGORY.EXPENSIVE
+            reason = "Collectible hat"
+
+
+        -- ----------------------------------------------------
+        -- MECHANISMS
+        -- ----------------------------------------------------
+
+        elseif containsAny(lowerName, mechanisms) then
+
+            price = PRICE_EXPENSIVE
+            category = CATEGORY.EXPENSIVE
+            reason = "Complex mechanism"
+
+
+        -- ----------------------------------------------------
+        -- MODDED WEAPONS
+        -- ----------------------------------------------------
+
+        elseif containsAny(lowerName, modWeapons) then
+
+            price = PRICE_EXPENSIVE
+            category = CATEGORY.EXPENSIVE
+            reason = "Modded weapon"
+
+
+        -- ----------------------------------------------------
+        -- RARE MOB DROP
+        -- ----------------------------------------------------
+
+        elseif containsAny(lowerName, rareDropWords) then
+
+            price = PRICE_EXPENSIVE
+            category = CATEGORY.EXPENSIVE
+            reason = "Rare modded mob drop"
+
+
+        -- ----------------------------------------------------
+        -- MODDED FOOD
+        -- ----------------------------------------------------
+
+        elseif containsAny(lowerName, modFoodWords)
+            or (item.tags and item.tags["minecraft:food"]) then
+
+            price = PRICE_MEDIUM
+            category = CATEGORY.MEDIUM
+            reason = "Prepared modded food"
+
+
+        -- ----------------------------------------------------
+        -- MODDED BASIC CRAFT
+        -- ----------------------------------------------------
+
+        elseif containsAny(lowerName, simpleModCrafts) then
+
+            price = PRICE_NORMAL
+            category = CATEGORY.NORMAL
+            reason = "Simple modded crafting component"
+
+
+        -- ----------------------------------------------------
+        -- UNKNOWN MODDED ITEM
+        -- ----------------------------------------------------
+
+        else
+
+            -- Unknown modded items are still more valuable
+            -- than basic vanilla materials.
+
+            price = PRICE_NORMAL
+            category = CATEGORY.NORMAL
+            reason = "Unknown modded item"
+
         end
 
     end
 
 
-    return price
+    -- ========================================================
+    -- ENCHANTMENT BONUS
+    -- ========================================================
+
+    local enchantmentValue = getEnchantmentScore(item)
+
+    if enchantmentValue > 0 then
+
+        price = price + enchantmentValue
+
+        if enchantmentValue >= 60 then
+
+            category = CATEGORY.VERY_EXPENSIVE
+            reason = "Strong enchantments"
+
+        elseif enchantmentValue >= 30 then
+
+            category = CATEGORY.EXPENSIVE
+            reason = "Useful enchantments"
+
+        else
+
+            category = CATEGORY.MEDIUM
+            reason = "Simple enchantments"
+
+        end
+
+    end
+
+
+    -- ========================================================
+    -- ENCHANTED BOOK
+    -- ========================================================
+
+    if contains(lowerName, "enchanted_book") then
+
+        if enchantmentValue >= 60 then
+
+            price = math.max(price, PRICE_VERY_EXPENSIVE)
+
+        elseif enchantmentValue >= 30 then
+
+            price = math.max(price, PRICE_EXPENSIVE)
+
+        else
+
+            price = math.max(price, PRICE_MEDIUM)
+
+        end
+
+    end
+
+
+    -- ========================================================
+    -- FINAL PRICE
+    -- ========================================================
+
+    price = math.floor(price)
+
+    return price, category, reason
 end
 
 
@@ -832,8 +1092,12 @@ local function showItem(item)
     local id = item.name or ""
     local namespace = getNamespace(id)
 
-    local price = calculatePrice(item)
-    local total = price * item.count
+    local price, category, reason =
+        evaluateItem(item)
+
+    local total =
+        price * item.count
+
 
     print("================================")
     print("        MARKET APPRAISER")
@@ -859,8 +1123,9 @@ local function showItem(item)
     print(item.count)
 
     print()
+
     print("--------------------------------")
-    print("ESTIMATED VALUE")
+    print("VALUE")
     print("--------------------------------")
     print()
 
@@ -874,14 +1139,18 @@ local function showItem(item)
 
     print()
 
-    print("--------------------------------")
+    print("Category:")
+    print(category)
 
-    if namespace == "minecraft" then
-        print("Category: VANILLA")
-    else
-        print("Category: MODDED")
-    end
+    print()
 
+    print("Reason:")
+    print(reason)
+
+
+    -- ========================================================
+    -- DEBUG
+    -- ========================================================
 
     if DEBUG then
 
@@ -890,18 +1159,16 @@ local function showItem(item)
         print("DEBUG")
         print("--------------------------------")
 
-        print("Base:")
-        print(getBaseValue(item))
-
-        print("Complexity:")
-        print(getComplexity(item))
+        print("Enchant value:")
+        print(getEnchantmentScore(item))
 
     end
+
 end
 
 
 -- ============================================================
--- GET FIRST ITEM
+-- GET FIRST ITEM FROM BARREL
 -- ============================================================
 
 local function getFirstItem()
@@ -910,7 +1177,8 @@ local function getFirstItem()
 
     for slot, data in pairs(items) do
 
-        local detail = inventory.getItemDetail(slot)
+        local detail =
+            inventory.getItemDetail(slot)
 
         if detail then
             return detail
@@ -932,10 +1200,10 @@ while true do
 
     local item = getFirstItem()
 
+
     if not item then
 
         if lastID ~= nil then
-
             clear()
         end
 
@@ -949,24 +1217,26 @@ while true do
 
         lastID = nil
 
+
     else
 
-        local id =
+        local currentID =
             tostring(item.name)
             .. ":"
             .. tostring(item.nbt)
             .. ":"
             .. tostring(item.count)
 
-        if id ~= lastID then
+        if currentID ~= lastID then
 
             showItem(item)
 
-            lastID = id
+            lastID = currentID
 
         end
 
     end
+
 
     sleep(1)
 
