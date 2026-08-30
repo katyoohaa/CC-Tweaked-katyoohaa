@@ -2,22 +2,17 @@
 -- CLOTHING SHOP
 -- CC:Tweaked + RS Bridge + Create Packager
 --
--- СХЕМА:
---
 -- LEFT   = сундук с одеждой
 -- RIGHT  = сундук оплаты
 -- BOTTOM = RS Bridge
 -- BACK   = редстоун на Packager
 --
--- ОПЛАТА ПОКА: АЛМАЗЫ
+-- ЦЕНЫ:
 --
--- ЦЕНА В ИМЕНИ:
---
---   Dress 64
---   Dress 64xx
---   Dress [64xx]
---
--- Все эти варианты = 64
+-- boots       = 64
+-- leggings    = 128
+-- helmet      = 128
+-- chestplate  = 192
 --
 --========================================================
 
@@ -30,41 +25,35 @@ local ITEM_CHEST_SIDE = "left"
 local PAYMENT_CHEST_SIDE = "right"
 local RS_BRIDGE_SIDE = "bottom"
 
--- Сторона, через которую компьютер включает Packager
 local PACKAGER_REDSTONE_SIDE = "back"
 
--- Частота проверки
 local CHECK_INTERVAL = 1
-
--- Сколько секунд держать сигнал Packager
 local PACKAGER_SIGNAL_TIME = 1
-
--- Максимальное время ожидания отправки одежды
 local PACKING_TIMEOUT = 30
 
 
 ----------------------------------------------------------
--- ПОДКЛЮЧЕНИЕ ПЕРИФЕРИЙ
+-- ПОДКЛЮЧЕНИЕ
 ----------------------------------------------------------
 
 local itemChest = peripheral.wrap(ITEM_CHEST_SIDE)
 
 if not itemChest then
-    error("ERROR: Item chest not found on " .. ITEM_CHEST_SIDE)
+    error("ERROR: Item chest not found on LEFT")
 end
 
 
 local paymentChest = peripheral.wrap(PAYMENT_CHEST_SIDE)
 
 if not paymentChest then
-    error("ERROR: Payment chest not found on " .. PAYMENT_CHEST_SIDE)
+    error("ERROR: Payment chest not found on RIGHT")
 end
 
 
 local rsBridge = peripheral.wrap(RS_BRIDGE_SIDE)
 
 if not rsBridge then
-    error("ERROR: RS Bridge not found on " .. RS_BRIDGE_SIDE)
+    error("ERROR: RS Bridge not found on BOTTOM")
 end
 
 
@@ -81,41 +70,18 @@ end
 
 
 ----------------------------------------------------------
--- ПОЛУЧЕНИЕ ИМЕНИ ПРЕДМЕТА
+-- ПОЛУЧЕНИЕ ЦЕНЫ ПО ID ПРЕДМЕТА
 ----------------------------------------------------------
-
-local function getItemName(item)
-
-    -- Основной вариант CC:Tweaked
-    if item.displayName then
-        return tostring(item.displayName)
-    end
-
-    -- Запасной вариант
-    if item.label then
-        return tostring(item.label)
-    end
-
-    -- Если переименованного имени нет
-    if item.name then
-        return tostring(item.name)
-    end
-
-    return "Unknown item"
-
-end
-
-
-----------------------------------------------------------
--- ПОЛУЧЕНИЕ ЦЕНЫ
 --
--- Поддерживаются:
+-- Например:
 --
--- Dress 64
--- Dress 64xx
--- Dress [64xx]
--- Dress [64XX]
--- Dress 64XX
+-- selfexpression:snow_hunter_boots
+--
+-- заканчивается на:
+--
+-- boots
+--
+-- Поэтому цена = 64
 --
 ----------------------------------------------------------
 
@@ -126,85 +92,58 @@ local function getPrice(item)
     end
 
 
-    ------------------------------------------------------
-    -- Получаем именно displayName
-    ------------------------------------------------------
+    local id = tostring(item.name or "")
 
-    local name = item.displayName
+    id = id:lower()
 
 
     ------------------------------------------------------
-    -- Если displayName отсутствует, пробуем label
+    -- ОБУВЬ
     ------------------------------------------------------
 
-    if not name then
-        name = item.label
+    if id:match("_boots$") then
+
+        return 64
+
     end
 
 
     ------------------------------------------------------
-    -- Без отображаемого имени цену определить нельзя
+    -- ШТАНЫ
     ------------------------------------------------------
 
-    if not name then
-        return nil
-    end
+    if id:match("_leggings$") then
 
+        return 128
 
-    name = tostring(name)
-
-
-    ------------------------------------------------------
-    -- Убираем пробелы в начале и конце
-    ------------------------------------------------------
-
-    name = name:gsub("^%s+", "")
-    name = name:gsub("%s+$", "")
-
-
-    ------------------------------------------------------
-    -- Вариант:
-    --
-    -- [64xx]
-    ------------------------------------------------------
-
-    local price = name:match("%[(%d+)%s*[xX][xX]%]")
-
-    if price then
-        return tonumber(price)
     end
 
 
     ------------------------------------------------------
-    -- Вариант:
-    --
-    -- 64xx
+    -- ШЛЯПА
     ------------------------------------------------------
 
-    price = name:match("(%d+)%s*[xX][xX]")
+    if id:match("_helmet$") then
 
-    if price then
-        return tonumber(price)
+        return 128
+
     end
 
 
     ------------------------------------------------------
-    -- Вариант:
-    --
-    -- 64
-    --
-    -- Только число в конце имени.
-    --
-    -- Это позволяет избежать ситуации, когда число
-    -- является частью обычного названия.
+    -- НАГРУДНИК
     ------------------------------------------------------
 
-    price = name:match("(%d+)%s*$")
+    if id:match("_chestplate$") then
 
-    if price then
-        return tonumber(price)
+        return 192
+
     end
 
+
+    ------------------------------------------------------
+    -- НЕИЗВЕСТНЫЙ ПРЕДМЕТ
+    ------------------------------------------------------
 
     return nil
 
@@ -212,7 +151,32 @@ end
 
 
 ----------------------------------------------------------
--- СКАНИРОВАНИЕ СУНДУКА С ОДЕЖДОЙ
+-- ПОЛУЧЕНИЕ ОТОБРАЖАЕМОГО ИМЕНИ
+----------------------------------------------------------
+
+local function getItemName(item)
+
+    if item.displayName then
+
+        return tostring(item.displayName)
+
+    end
+
+
+    if item.label then
+
+        return tostring(item.label)
+
+    end
+
+
+    return tostring(item.name or "Unknown item")
+
+end
+
+
+----------------------------------------------------------
+-- СКАНИРОВАНИЕ СУНДУКА
 ----------------------------------------------------------
 
 local function scanItems()
@@ -229,9 +193,9 @@ local function scanItems()
 
     for slot, item in pairs(list) do
 
-        local name = getItemName(item)
-
         local price = getPrice(item)
+
+        local name = getItemName(item)
 
 
         local entry = {
@@ -240,11 +204,11 @@ local function scanItems()
 
             name = name,
 
+            itemID = item.name,
+
             count = item.count,
 
-            price = price,
-
-            itemID = item.name
+            price = price
 
         }
 
@@ -256,7 +220,7 @@ local function scanItems()
 
             total =
                 total +
-                (price * item.count)
+                price * item.count
 
         else
 
@@ -297,7 +261,7 @@ end
 
 
 ----------------------------------------------------------
--- ПОЛУЧЕНИЕ АЛМАЗОВ В СУНДУКЕ ОПЛАТЫ
+-- АЛМАЗЫ В СУНДУКЕ ОПЛАТЫ
 ----------------------------------------------------------
 
 local function getPaymentChestDiamonds()
@@ -327,25 +291,18 @@ end
 
 
 ----------------------------------------------------------
--- ПОЛУЧЕНИЕ КОЛИЧЕСТВА АЛМАЗОВ В RS
---
--- Здесь специально используется несколько способов,
--- потому что API RS Bridge отличается между версиями.
+-- АЛМАЗЫ В RS
 ----------------------------------------------------------
 
 local function getRSDiamonds()
 
     ------------------------------------------------------
-    -- Способ 1
-    --
-    -- getItem({
-    --     name = "minecraft:diamond"
-    -- })
+    -- getItem(table)
     ------------------------------------------------------
 
     if rsBridge.getItem then
 
-        local success, result =
+        local ok, result =
             pcall(
                 function()
 
@@ -357,7 +314,7 @@ local function getRSDiamonds()
             )
 
 
-        if success and result ~= nil then
+        if ok and result ~= nil then
 
             if type(result) == "number" then
 
@@ -369,11 +326,16 @@ local function getRSDiamonds()
             if type(result) == "table" then
 
                 if result.amount then
+
                     return tonumber(result.amount) or 0
+
                 end
 
+
                 if result.count then
+
                     return tonumber(result.count) or 0
+
                 end
 
             end
@@ -384,14 +346,12 @@ local function getRSDiamonds()
 
 
     ------------------------------------------------------
-    -- Способ 2
-    --
-    -- getItem("minecraft:diamond")
+    -- getItem(string)
     ------------------------------------------------------
 
     if rsBridge.getItem then
 
-        local success, result =
+        local ok, result =
             pcall(
                 function()
 
@@ -403,7 +363,7 @@ local function getRSDiamonds()
             )
 
 
-        if success and result ~= nil then
+        if ok and result ~= nil then
 
             if type(result) == "number" then
 
@@ -415,11 +375,16 @@ local function getRSDiamonds()
             if type(result) == "table" then
 
                 if result.amount then
+
                     return tonumber(result.amount) or 0
+
                 end
 
+
                 if result.count then
+
                     return tonumber(result.count) or 0
+
                 end
 
             end
@@ -430,14 +395,12 @@ local function getRSDiamonds()
 
 
     ------------------------------------------------------
-    -- Способ 3
-    --
     -- list()
     ------------------------------------------------------
 
     if rsBridge.list then
 
-        local success, result =
+        local ok, result =
             pcall(
                 function()
 
@@ -447,19 +410,18 @@ local function getRSDiamonds()
             )
 
 
-        if success and type(result) == "table" then
+        if ok and type(result) == "table" then
 
             for _, item in pairs(result) do
 
-                if item.name == "minecraft:diamond" then
+                if item.name ==
+                    "minecraft:diamond" then
 
-                    return
-                        tonumber(
-                            item.amount
-                            or item.count
-                            or 0
-                        )
+                    return tonumber(
+                        item.amount
+                        or item.count
                         or 0
+                    ) or 0
 
                 end
 
@@ -469,10 +431,6 @@ local function getRSDiamonds()
 
     end
 
-
-    ------------------------------------------------------
-    -- Ничего не нашли
-    ------------------------------------------------------
 
     return 0
 
@@ -483,29 +441,23 @@ end
 -- ПОКАЗ ТОВАРОВ
 ----------------------------------------------------------
 
-local function showItems(items)
+local function displayItems(items)
 
     for _, item in ipairs(items) do
-
-        local priceText = "NO PRICE"
-
-
-        if item.price then
-
-            priceText =
-                tostring(item.price) ..
-                "xx"
-
-        end
-
 
         print(item.name)
 
         print(
-            "  x" ..
+            "ID: " ..
+            tostring(item.itemID)
+        )
+
+        print(
+            "x" ..
             tostring(item.count) ..
-            "    " ..
-            priceText
+            "  " ..
+            tostring(item.price) ..
+            "xx each"
         )
 
         print()
@@ -517,22 +469,6 @@ end
 
 ----------------------------------------------------------
 -- ОЖИДАНИЕ ОПЛАТЫ
-----------------------------------------------------------
---
--- initialRS = количество алмазов в RS ДО оплаты.
---
--- Если было:
---
--- 100
---
--- а стало:
---
--- 164
---
--- значит внесено:
---
--- 64
---
 ----------------------------------------------------------
 
 local function waitForPayment(
@@ -550,22 +486,16 @@ local function waitForPayment(
             currentRS - initialRS
 
 
-        --------------------------------------------------
-        -- На случай если RS уменьшился
-        --------------------------------------------------
-
         if paid < 0 then
+
             paid = 0
+
         end
 
 
-        local paymentChest =
+        local chestDiamonds =
             getPaymentChestDiamonds()
 
-
-        --------------------------------------------------
-        -- ЭКРАН
-        --------------------------------------------------
 
         clearScreen()
 
@@ -582,51 +512,55 @@ local function waitForPayment(
             " diamonds"
         )
 
+
         print()
 
 
         print(
             "RECEIVED: " ..
-            tostring(paid) ..
-            " diamonds"
+            tostring(paid)
         )
+
 
         print()
 
 
         print(
-            "IN PAYMENT CHEST: " ..
-            tostring(paymentChest)
+            "PAYMENT CHEST: " ..
+            tostring(chestDiamonds)
         )
+
 
         print()
 
 
-        local remaining =
-            required - paid
+        if paid >= required then
 
+            print("==============================")
+            print("       PAYMENT ACCEPTED")
+            print("==============================")
 
-        if remaining > 0 then
-
-            print(
-                "REMAINING: " ..
-                tostring(remaining)
-            )
-
-        else
-
-            print("PAYMENT ACCEPTED!")
-
-            print()
 
             return paid
 
         end
 
 
+        print(
+            "REMAINING: " ..
+            tostring(required - paid)
+        )
+
+
         print()
-        print("Please place diamonds")
-        print("into the payment chest.")
+
+        print(
+            "Place diamonds into"
+        )
+
+        print(
+            "the RIGHT chest."
+        )
 
 
         sleep(CHECK_INTERVAL)
@@ -650,13 +584,9 @@ local function startPackager()
     print("==============================")
     print()
 
-    print("Sending order to Packager...")
-    print()
 
+    print("Starting Packager...")
 
-    ------------------------------------------------------
-    -- Сигнал
-    ------------------------------------------------------
 
     redstone.setOutput(
         PACKAGER_REDSTONE_SIDE,
@@ -667,10 +597,6 @@ local function startPackager()
     sleep(PACKAGER_SIGNAL_TIME)
 
 
-    ------------------------------------------------------
-    -- Выключаем сигнал
-    ------------------------------------------------------
-
     redstone.setOutput(
         PACKAGER_REDSTONE_SIDE,
         false
@@ -680,7 +606,7 @@ end
 
 
 ----------------------------------------------------------
--- ОЖИДАНИЕ ОТПРАВКИ ОДЕЖДЫ
+-- ОЖИДАНИЕ ОТПРАВКИ ВЕЩЕЙ
 ----------------------------------------------------------
 
 local function waitForPacking()
@@ -689,7 +615,6 @@ local function waitForPacking()
 
 
     while elapsed < PACKING_TIMEOUT do
-
 
         if chestIsEmpty(itemChest) then
 
@@ -713,7 +638,7 @@ end
 
 
 ----------------------------------------------------------
--- ПОКАЗ ОШИБКИ ЦЕНЫ
+-- ОШИБКА
 ----------------------------------------------------------
 
 local function showInvalidItems(invalid)
@@ -722,12 +647,13 @@ local function showInvalidItems(invalid)
 
 
     print("==============================")
-    print("           ERROR")
+    print("          ERROR")
     print("==============================")
     print()
 
 
-    print("PRICE NOT FOUND:")
+    print("UNKNOWN CLOTHING:")
+
     print()
 
 
@@ -735,31 +661,44 @@ local function showInvalidItems(invalid)
 
         print(item.name)
 
+        print()
+
         print(
-            "Amount: " ..
-            tostring(item.count)
+            "ID: " ..
+            tostring(item.itemID)
+        )
+
+        print()
+
+        print(
+            "The item does not end with:"
+        )
+
+        print(
+            "_boots"
+        )
+
+        print(
+            "_leggings"
+        )
+
+        print(
+            "_helmet"
+        )
+
+        print(
+            "_chestplate"
         )
 
         print()
 
     end
 
-
-    print("------------------------------")
-    print()
-
-
-    print("Use price like:")
-    print("[64xx]")
-    print("or 64xx")
-    print("or 64")
-
-
 end
 
 
 ----------------------------------------------------------
--- ЗАПУСК
+-- СТАРТ
 ----------------------------------------------------------
 
 clearScreen()
@@ -778,14 +717,14 @@ sleep(2)
 
 
 ----------------------------------------------------------
--- ОСНОВНОЙ ЦИКЛ
+-- ГЛАВНЫЙ ЦИКЛ
 ----------------------------------------------------------
 
 while true do
 
 
     ------------------------------------------------------
-    -- СКАНИРУЕМ СУНДУК
+    -- СКАНИРУЕМ ОДЕЖДУ
     ------------------------------------------------------
 
     local items, total, invalid =
@@ -812,12 +751,13 @@ while true do
 
         print()
 
+
         print(
             "Place clothing into"
         )
 
         print(
-            "the chest on the LEFT."
+            "the LEFT chest."
         )
 
 
@@ -825,7 +765,7 @@ while true do
 
 
     ------------------------------------------------------
-    -- ЕСТЬ ПРЕДМЕТЫ БЕЗ ЦЕНЫ
+    -- НЕИЗВЕСТНАЯ ОДЕЖДА
     ------------------------------------------------------
 
     elseif #invalid > 0 then
@@ -838,14 +778,14 @@ while true do
 
 
     ------------------------------------------------------
-    -- ЗАКАЗ КОРРЕКТНЫЙ
+    -- ЗАКАЗ ГОТОВ
     ------------------------------------------------------
 
     else
 
 
         --------------------------------------------------
-        -- Запоминаем количество алмазов ДО оплаты
+        -- Запоминаем количество алмазов в RS
         --------------------------------------------------
 
         local initialRS =
@@ -853,7 +793,7 @@ while true do
 
 
         --------------------------------------------------
-        -- Показываем заказ
+        -- ПОКАЗЫВАЕМ ЗАКАЗ
         --------------------------------------------------
 
         clearScreen()
@@ -870,11 +810,10 @@ while true do
         print()
 
 
-        showItems(items)
+        displayItems(items)
 
 
         print("------------------------------")
-
 
         print()
 
@@ -894,7 +833,7 @@ while true do
         )
 
         print(
-            "the PAYMENT CHEST."
+            "the RIGHT payment chest."
         )
 
 
@@ -940,29 +879,24 @@ while true do
 
         if change > 0 then
 
+            print()
+
             print(
-                "CHANGE: " ..
+                "OVERPAYMENT: " ..
                 tostring(change)
             )
 
             print()
 
             print(
-                "IMPORTANT:"
+                "Change is not returned"
             )
 
             print(
-                "Extra diamonds are not"
-            )
-
-            print(
-                "returned automatically yet."
+                "automatically yet."
             )
 
         end
-
-
-        print()
 
 
         sleep(3)
@@ -976,7 +910,7 @@ while true do
 
 
         --------------------------------------------------
-        -- ЖДЁМ ПОКА ОДЕЖДА УЕДЕТ
+        -- ЖДЁМ ОТПРАВКИ
         --------------------------------------------------
 
         clearScreen()
@@ -989,14 +923,12 @@ while true do
 
 
         print(
-            "Your clothes are being"
+            "Sending clothes"
         )
 
         print(
-            "sent to the Packager."
+            "to the Packager..."
         )
-
-        print()
 
 
         local success =
@@ -1004,7 +936,7 @@ while true do
 
 
         --------------------------------------------------
-        -- УСПЕШНО
+        -- ГОТОВО
         --------------------------------------------------
 
         if success then
@@ -1036,7 +968,7 @@ while true do
 
 
         --------------------------------------------------
-        -- НЕ УСПЕЛИ ОТПРАВИТЬ
+        -- ОШИБКА PACKAGER
         --------------------------------------------------
 
         else
@@ -1052,11 +984,11 @@ while true do
 
 
             print(
-                "The clothing chest"
+                "Clothes are still"
             )
 
             print(
-                "was not emptied."
+                "in the item chest."
             )
 
 
@@ -1074,10 +1006,6 @@ while true do
 
         end
 
-
-        --------------------------------------------------
-        -- Пауза перед следующим заказом
-        --------------------------------------------------
 
         sleep(5)
 
