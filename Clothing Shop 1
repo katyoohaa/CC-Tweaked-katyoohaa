@@ -1,0 +1,873 @@
+--========================================================
+-- CLOTHING SHOP
+-- CC:Tweaked + RS Bridge + Create Packager
+--
+-- Схема:
+--
+-- LEFT   = сундук с вещами
+-- RIGHT  = сундук оплаты
+-- BOTTOM = RS Bridge
+-- BACK   = редстоун на Packager
+--
+-- Цена берётся из названия предмета.
+--
+-- Примеры:
+--   "Pink Dress [16xx]"  -> 16
+--   "Black Jacket [32xx]" -> 32
+--   "Fancy Hat [64xx]"   -> 64
+--
+-- Пока валюта: DIAMOND
+--
+--========================================================
+
+
+----------------------------------------------------------
+-- НАСТРОЙКИ
+----------------------------------------------------------
+
+local ITEM_CHEST_SIDE = "left"
+local PAYMENT_CHEST_SIDE = "right"
+local RS_BRIDGE_SIDE = "bottom"
+
+-- Сторона компьютера, которая управляет Packager.
+local PACKAGER_REDSTONE_SIDE = "back"
+
+-- Как часто проверять сундуки.
+local CHECK_INTERVAL = 1
+
+-- Через сколько секунд считать, что упаковка началась.
+local PACKAGER_START_DELAY = 2
+
+-- Максимальное время ожидания, пока вещи исчезнут
+-- из сундука и уйдут в Packager.
+local PACKING_TIMEOUT = 30
+
+
+----------------------------------------------------------
+-- ПОДКЛЮЧЕНИЕ ПЕРИФЕРИЙ
+----------------------------------------------------------
+
+local itemChest = peripheral.wrap(ITEM_CHEST_SIDE)
+
+if not itemChest then
+    error("Не найден сундук с вещами: " .. ITEM_CHEST_SIDE)
+end
+
+
+local paymentChest = peripheral.wrap(PAYMENT_CHEST_SIDE)
+
+if not paymentChest then
+    error("Не найден сундук оплаты: " .. PAYMENT_CHEST_SIDE)
+end
+
+
+local rsBridge = peripheral.wrap(RS_BRIDGE_SIDE)
+
+if not rsBridge then
+    error("Не найден RS Bridge: " .. RS_BRIDGE_SIDE)
+end
+
+
+----------------------------------------------------------
+-- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+----------------------------------------------------------
+
+local function clearScreen()
+
+    term.clear()
+    term.setCursorPos(1, 1)
+
+end
+
+
+local function centerText(text, y)
+
+    local width, height = term.getSize()
+
+    local x = math.floor((width - #text) / 2) + 1
+
+    term.setCursorPos(math.max(1, x), y)
+
+    print(text)
+
+end
+
+
+----------------------------------------------------------
+-- ПОЛУЧЕНИЕ НАЗВАНИЯ ПРЕДМЕТА
+----------------------------------------------------------
+
+local function getItemName(item)
+
+    if item.displayName then
+        return item.displayName
+    end
+
+    if item.name then
+        return item.name
+    end
+
+    return "Unknown item"
+
+end
+
+
+----------------------------------------------------------
+-- ПОЛУЧЕНИЕ ЦЕНЫ
+--
+-- Ищет:
+--
+-- 16xx
+-- 32xx
+-- 64xx
+-- 512xx
+--
+-- Также работает с:
+--
+-- 16xx
+-- 16XX
+-- 16xx
+--
+----------------------------------------------------------
+
+local function getPrice(displayName)
+
+    if not displayName then
+        return nil
+    end
+
+    local price = displayName:match("(%d+)%s*[xX][xX]")
+
+    if not price then
+        return nil
+    end
+
+    return tonumber(price)
+
+end
+
+
+----------------------------------------------------------
+-- СКАНИРОВАНИЕ СУНДУКА С ВЕЩАМИ
+----------------------------------------------------------
+
+local function scanItems()
+
+    local items = {}
+
+    local total = 0
+
+    local invalid = {}
+
+    local list = itemChest.list()
+
+    for slot, item in pairs(list) do
+
+        local name = getItemName(item)
+
+        local price = getPrice(name)
+
+        local entry = {
+
+            slot = slot,
+
+            name = name,
+
+            count = item.count,
+
+            price = price,
+
+            itemID = item.name
+
+        }
+
+        table.insert(items, entry)
+
+
+        if price then
+
+            total = total + price * item.count
+
+        else
+
+            table.insert(invalid, entry)
+
+        end
+
+    end
+
+    return items, total, invalid
+
+end
+
+
+----------------------------------------------------------
+-- ПРОВЕРКА ПУСТОГО СУНДУКА
+----------------------------------------------------------
+
+local function isChestEmpty(chest)
+
+    local list = chest.list()
+
+    for _, _ in pairs(list) do
+        return false
+    end
+
+    return true
+
+end
+
+
+----------------------------------------------------------
+-- КОЛИЧЕСТВО ПРЕДМЕТОВ В СУНДУКЕ ОПЛАТЫ
+--
+-- Сейчас считаем только DIAMOND.
+----------------------------------------------------------
+
+local function getDiamondsInPaymentChest()
+
+    local total = 0
+
+    local list = paymentChest.list()
+
+    for _, item in pairs(list) do
+
+        if item.name == "minecraft:diamond" then
+
+            total = total + item.count
+
+        end
+
+    end
+
+    return total
+
+end
+
+
+----------------------------------------------------------
+-- ПОЛУЧЕНИЕ КОЛИЧЕСТВА АЛМАЗОВ В RS
+--
+-- Используются несколько вариантов API,
+-- чтобы код работал с разными версиями RS Bridge.
+----------------------------------------------------------
+
+local function getDiamondsInRS()
+
+    ------------------------------------------------------
+    -- Вариант 1: getItem()
+    ------------------------------------------------------
+
+    if rsBridge.getItem then
+
+        local ok, result = pcall(function()
+
+            return rsBridge.getItem({
+                name = "minecraft:diamond"
+            })
+
+        end)
+
+
+        if ok and result then
+
+            if type(result) == "number" then
+
+                return result
+
+            end
+
+
+            if type(result) == "table" then
+
+                if result.amount then
+                    return result.amount
+                end
+
+                if result.count then
+                    return result.count
+                end
+
+            end
+
+        end
+
+    end
+
+
+    ------------------------------------------------------
+    -- Вариант 2: getItem("minecraft:diamond")
+    ------------------------------------------------------
+
+    if rsBridge.getItem then
+
+        local ok, result = pcall(function()
+
+            return rsBridge.getItem("minecraft:diamond")
+
+        end)
+
+
+        if ok and result then
+
+            if type(result) == "number" then
+
+                return result
+
+            end
+
+
+            if type(result) == "table" then
+
+                if result.amount then
+                    return result.amount
+                end
+
+                if result.count then
+                    return result.count
+                end
+
+            end
+
+        end
+
+    end
+
+
+    ------------------------------------------------------
+    -- Вариант 3: list()
+    ------------------------------------------------------
+
+    if rsBridge.list then
+
+        local ok, result = pcall(function()
+
+            return rsBridge.list()
+
+        end)
+
+
+        if ok and type(result) == "table" then
+
+            for _, item in pairs(result) do
+
+                if item.name == "minecraft:diamond" then
+
+                    return item.amount
+                        or item.count
+                        or 0
+
+                end
+
+            end
+
+        end
+
+    end
+
+
+    ------------------------------------------------------
+    -- Если ничего не получилось
+    ------------------------------------------------------
+
+    return 0
+
+end
+
+
+----------------------------------------------------------
+-- ОЖИДАНИЕ ПЕРЕНОСА ДЕНЕГ В RS
+----------------------------------------------------------
+--
+-- ВАЖНО:
+--
+-- Мы запоминаем старое количество алмазов.
+--
+-- Например:
+--
+-- RS до оплаты = 100
+--
+-- Игрок кладёт 5 алмазов.
+--
+-- RS после импорта = 105
+--
+-- Значит внесено:
+--
+-- 105 - 100 = 5
+--
+----------------------------------------------------------
+
+local function waitForPayment(required, initialRS)
+
+    while true do
+
+        --------------------------------------------------
+        -- Сколько алмазов лежит сейчас в сундуке оплаты
+        --------------------------------------------------
+
+        local chestDiamonds = getDiamondsInPaymentChest()
+
+
+        --------------------------------------------------
+        -- Сколько алмазов уже в RS
+        --------------------------------------------------
+
+        local currentRS = getDiamondsInRS()
+
+
+        --------------------------------------------------
+        -- Сколько новых алмазов поступило
+        --------------------------------------------------
+
+        local paid = currentRS - initialRS
+
+
+        --------------------------------------------------
+        -- Экран
+        --------------------------------------------------
+
+        clearScreen()
+
+        print("==============================")
+        print("       CLOTHING SHOP")
+        print("==============================")
+        print()
+
+        print("PRICE: " .. required .. " diamonds")
+
+        print()
+
+        print("PAYMENT CHEST:")
+        print(chestDiamonds .. " diamonds")
+
+        print()
+
+        print("RECEIVED BY RS:")
+        print(paid .. " diamonds")
+
+        print()
+
+
+        if paid >= required then
+
+            print("==============================")
+            print("       PAYMENT ACCEPTED")
+            print("==============================")
+            print()
+
+            return paid
+
+        end
+
+
+        local remaining = required - paid
+
+        print("REMAINING: " .. remaining)
+
+        print()
+        print("Please put diamonds")
+        print("into the payment chest.")
+
+
+        sleep(CHECK_INTERVAL)
+
+    end
+
+end
+
+
+----------------------------------------------------------
+-- УПРАВЛЕНИЕ PACKAGER
+----------------------------------------------------------
+
+local function startPackager()
+
+    clearScreen()
+
+    print("==============================")
+    print("       PAYMENT ACCEPTED")
+    print("==============================")
+    print()
+
+    print("Starting packaging...")
+    print()
+
+
+    ------------------------------------------------------
+    -- Включаем редстоун
+    ------------------------------------------------------
+
+    redstone.setOutput(
+        PACKAGER_REDSTONE_SIDE,
+        true
+    )
+
+
+    sleep(PACKAGER_START_DELAY)
+
+
+    ------------------------------------------------------
+    -- Выключаем редстоун
+    ------------------------------------------------------
+
+    redstone.setOutput(
+        PACKAGER_REDSTONE_SIDE,
+        false
+    )
+
+end
+
+
+----------------------------------------------------------
+-- ОЖИДАНИЕ ПОКА ВЕЩИ УЕДУТ В PACKAGER
+----------------------------------------------------------
+
+local function waitForPacking()
+
+    local timer = 0
+
+    while timer < PACKING_TIMEOUT do
+
+        if isChestEmpty(itemChest) then
+
+            return true
+
+        end
+
+        sleep(1)
+
+        timer = timer + 1
+
+    end
+
+    return false
+
+end
+
+
+----------------------------------------------------------
+-- ПОКАЗ ТОВАРОВ
+----------------------------------------------------------
+
+local function displayItems(items)
+
+    for _, item in ipairs(items) do
+
+        local priceText
+
+
+        if item.price then
+
+            priceText =
+                tostring(item.price) .. "xx"
+
+        else
+
+            priceText =
+                "NO PRICE"
+
+        end
+
+
+        print(item.name)
+
+        print(
+            "  x" ..
+            tostring(item.count) ..
+            "   " ..
+            priceText
+        )
+
+        print()
+
+    end
+
+end
+
+
+----------------------------------------------------------
+-- ПОКАЗ ОШИБОК
+----------------------------------------------------------
+
+local function displayInvalidItems(invalid)
+
+    clearScreen()
+
+    print("==============================")
+    print("          ERROR")
+    print("==============================")
+    print()
+
+    print("ITEM WITHOUT PRICE:")
+    print()
+
+
+    for _, item in ipairs(invalid) do
+
+        print(item.name)
+
+        print(
+            "Amount: " ..
+            tostring(item.count)
+        )
+
+        print()
+
+    end
+
+
+    print("------------------------------")
+    print()
+
+    print("Remove these items")
+    print("from the chest.")
+
+    print()
+
+end
+
+
+----------------------------------------------------------
+-- ГЛАВНЫЙ ЦИКЛ
+----------------------------------------------------------
+
+while true do
+
+
+    ------------------------------------------------------
+    -- СКАНИРУЕМ ТОВАР
+    ------------------------------------------------------
+
+    local items, total, invalid =
+        scanItems()
+
+
+    ------------------------------------------------------
+    -- СУНДУК ПУСТ
+    ------------------------------------------------------
+
+    if #items == 0 then
+
+        clearScreen()
+
+        print("==============================")
+        print("       CLOTHING SHOP")
+        print("==============================")
+        print()
+
+        centerText(
+            "CART IS EMPTY",
+            6
+        )
+
+        print()
+        print("Place clothing into")
+        print("the chest on the left.")
+
+        sleep(CHECK_INTERVAL)
+
+
+    ------------------------------------------------------
+    -- НЕПРАВИЛЬНАЯ ЦЕНА
+    ------------------------------------------------------
+
+    elseif #invalid > 0 then
+
+        displayInvalidItems(invalid)
+
+        sleep(2)
+
+
+    ------------------------------------------------------
+    -- ЗАКАЗ ГОТОВ К ОПЛАТЕ
+    ------------------------------------------------------
+
+    else
+
+        --------------------------------------------------
+        -- Запоминаем RS ДО оплаты
+        --------------------------------------------------
+
+        local initialRS =
+            getDiamondsInRS()
+
+
+        --------------------------------------------------
+        -- Показываем заказ
+        --------------------------------------------------
+
+        clearScreen()
+
+        print("==============================")
+        print("       CLOTHING SHOP")
+        print("==============================")
+        print()
+
+        print("YOUR ORDER:")
+        print()
+
+        displayItems(items)
+
+        print("------------------------------")
+
+        print()
+
+        print(
+            "TOTAL: " ..
+            tostring(total) ..
+            "xx"
+        )
+
+        print()
+
+        print("PAY WITH DIAMONDS")
+
+        print()
+
+        print("Place diamonds into")
+        print("the payment chest.")
+
+        print()
+
+
+        --------------------------------------------------
+        -- ЖДЁМ ОПЛАТУ
+        --------------------------------------------------
+
+        local paid =
+            waitForPayment(
+                total,
+                initialRS
+            )
+
+
+        --------------------------------------------------
+        -- ОПЛАТА ПОЛУЧЕНА
+        --------------------------------------------------
+
+        clearScreen()
+
+        print("==============================")
+        print("       PAYMENT OK")
+        print("==============================")
+        print()
+
+        print("PRICE: " .. total)
+
+        print("PAID:  " .. paid)
+
+        print()
+
+
+        --------------------------------------------------
+        -- СДАЧА
+        --
+        -- Пока НЕ выдаём сдачу автоматически.
+        --
+        -- Потому что валюта пока алмазы и нам сначала
+        -- нужно протестировать саму механику.
+        --------------------------------------------------
+
+        if paid > total then
+
+            print(
+                "CHANGE: " ..
+                (paid - total) ..
+                " diamonds"
+            )
+
+            print()
+
+            print("WARNING:")
+            print("Overpayment detected.")
+
+            print("Please remove extra")
+            print("diamonds from payment system.")
+
+            sleep(5)
+
+        end
+
+
+        --------------------------------------------------
+        -- ЗАПУСК PACKAGER
+        --------------------------------------------------
+
+        startPackager()
+
+
+        --------------------------------------------------
+        -- ЖДЁМ ПОКА ОДЕЖДА УЕДЕТ
+        --------------------------------------------------
+
+        clearScreen()
+
+        print("==============================")
+        print("       PACKING ORDER")
+        print("==============================")
+        print()
+
+        print("Your clothes are")
+        print("being packaged.")
+
+        print()
+
+
+        local packed =
+            waitForPacking()
+
+
+        --------------------------------------------------
+        -- УПАКОВКА УСПЕШНА
+        --------------------------------------------------
+
+        if packed then
+
+            clearScreen()
+
+            print("==============================")
+            print("       ORDER COMPLETE")
+            print("==============================")
+            print()
+
+            print("Your package is")
+            print("on its way!")
+
+            print()
+
+            print("Thank you!")
+
+
+        --------------------------------------------------
+        -- ОШИБКА УПАКОВКИ
+        --------------------------------------------------
+
+        else
+
+            clearScreen()
+
+            print("==============================")
+            print("      PACKAGING ERROR")
+            print("==============================")
+            print()
+
+            print("The clothing chest")
+            print("was not emptied.")
+
+            print()
+
+            print("Check the Packager")
+            print("and the belt.")
+
+        end
+
+
+        --------------------------------------------------
+        -- Небольшая пауза
+        --------------------------------------------------
+
+        sleep(5)
+
+    end
+
+end
